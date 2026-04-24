@@ -1,0 +1,109 @@
+%% Bluff backend — entry, database, socket server, and room flow (Mermaid)
+%% Open in a Mermaid viewer, or include in a .md file with a ```mermaid fence.
+
+flowchart TB
+  subgraph entry["Entry: main.go"]
+    M[main]
+    ENV[godotenv.Load]
+    M --> ENV
+    M --> MONGO[InitMongo from db.go]
+    M --> SRV[newSocketServer from socket.go]
+  end
+
+  subgraph http["net/http on :8080"]
+    H1["/socket.io/ → io.ServeHandler — Socket.IO"]
+    H2["/ — JSON: server info"]
+    H3["/health — JSON status ok"]
+  end
+
+  M --> H1
+  M --> H2
+  M --> H3
+  SRV --> H1
+
+  subgraph dbpkg["db.go — MongoDB"]
+    INIT[InitMongo: MONGODB_URI, optional MONGODB_DB default bluff]
+    PING[Ping primary read preference]
+    CLI[Client global + DB global + cleanup on defer]
+    INIT --> PING --> CLI
+  end
+
+  MONGO --> dbpkg
+
+  subgraph noteDb["Note"]
+    N1[Room state is in-memory roomStore, not Mongo yet.]
+  end
+  MONGO -.-> N1
+
+  subgraph skt["socket.go — Socket.IO v3 (zishang520)"]
+    OPT[DefaultServerOptions + CORS localhost:5173]
+    IO[server.NewServer]
+    RS[roomStore: mutex, rooms map, socketToRoom map]
+    TYPES[RoomState, RoomUser, room payloads]
+    OPT --> IO
+    IO --> RS
+    IO --> TYPES
+  end
+
+  SRV --> skt
+
+  subgraph handlers["Per-socket event handlers"]
+    C[connection]
+    E1[room:create]
+    E2[room:join]
+    E3[room:leave]
+    E4[room:message]
+    E5[disconnect]
+    C --> E1
+    C --> E2
+    C --> E3
+    C --> E4
+    C --> E5
+  end
+
+  IO --> C
+
+  subgraph storeOps["roomStore methods"]
+    CR[createRoom — 6-char code, capacity 4]
+    JR[joinRoom — ROOM_NOT_FOUND, ROOM_FULL]
+    LR[leaveRoom + host reassignment if host leaves]
+    GN[getSocketRoomAndName for chat]
+    CODES[generateUniqueRoomIDLocked, cloneRoomState]
+  end
+
+  RS --> storeOps
+  E1 --> storeOps
+  E2 --> storeOps
+  E3 --> storeOps
+  E4 --> storeOps
+  E5 --> storeOps
+
+  subgraph out["Emits to clients"]
+    O1[room:created / room:joined to caller]
+    O2[room:state to room]
+    O3[room:message to room]
+    O4[room:error on validation / business rules]
+  end
+
+  storeOps --> O2
+  E1 --> O1
+  E2 --> O1
+  E4 --> O3
+  E1 --> O4
+  E2 --> O4
+  E4 --> O4
+
+  subgraph helpers["Helpers in socket.go"]
+    PV[parseRoomPayload, parseRoomMessagePayload]
+    VN[isValidName]
+    EM[emitRoomState]
+  end
+
+  C --> helpers
+
+  classDef entry fill:#1a2d3d,color:#e3f2fd
+  classDef data fill:#1d3d2a,color:#e8f5e9
+  classDef sk fill:#2d1f3d,color:#f3e5f5
+  class M,ENV,SRV,H1,H2,H3 entry
+  class MONGO,INIT,CLI,RS data
+  class IO,OPT,C,E1,E2,E3,E4,E5 sk

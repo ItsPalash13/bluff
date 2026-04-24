@@ -1,0 +1,80 @@
+%% Bluff frontend — components, themes, and wiring (Mermaid)
+%% Open in a Mermaid viewer, or include in a .md file with a ```mermaid fence.
+
+flowchart TB
+  subgraph entry["Entry: main.tsx"]
+    M[main.tsx]
+    M --> RDX[Redux Provider + store]
+    RDX --> TP[ThemeProvider + mainTheme.green + CssBaseline]
+    TP --> BR[BrowserRouter]
+    BR --> A[App]
+  end
+
+  subgraph themeLayer["Theme layer"]
+    T1[theme1.ts: felt tokens, characterFolder, gradients]
+    MT[mainTheme.ts: MUI createTheme, palette, CssBaseline bg]
+    T1 --> MT
+  end
+
+  TP -.->|uses| MT
+
+  subgraph state["State (Redux)"]
+    ST[store.ts]
+    US[uiSlice: commentOpen, etc.]
+    HK[hooks: typed useDispatch / useSelector]
+    ST --> US
+  end
+
+  RDX --> ST
+  A --> HK
+  A --> US
+
+  subgraph app["App.tsx"]
+    SP[SocketProvider — socket.io context]
+    AS[AppShell]
+    SP --> AS
+    AS --> RU["Routes: / and /:roomId → Room"]
+    AS --> CB[CommentBox]
+  end
+
+  A --> SP
+  AS --> US
+
+  subgraph roomView["Room flow"]
+    Room[Room.tsx]
+    Lobby[Lobby.jsx]
+    CCS[CharacterCardSelector]
+    CIS[characterImageSources / characterAvatarTypes]
+    T1a[theme1 — character pack id]
+    Room --> Lobby
+    Room --> CCS
+    CCS --> CIS
+    Room --> T1a
+    Lobby --> CIS
+    Lobby --> T1a
+  end
+
+  RU --> Room
+  Room --> SP
+  Room --> US
+
+  subgraph assets["Asset components (not imported by Room/App yet)"]
+    PC[PlayingCard + playingCardSources/Types + PlayingCard.css]
+    CA[CharacterAvatar]
+    RS[RoomSettings]
+  end
+
+  subgraph styles["Global CSS"]
+    IC[index.css]
+    AC[App.css — Room]
+  end
+
+  M --> IC
+  Room --> AC
+
+  CB -->|MUI useTheme| MT
+
+  classDef theme fill:#1a3d2e,color:#e8f5e9
+  classDef data fill:#1e2a4a,color:#e3e8ff
+  class T1,MT,TP theme
+  class ST,US,HK,SP data
