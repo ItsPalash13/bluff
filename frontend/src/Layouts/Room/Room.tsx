@@ -38,7 +38,10 @@ export function Room({ roomSession }: RoomProps) {
   const [gameStatus, setGameStatus] = useState(roomSession.room.status || 'waiting')
   const [selectedRank, setSelectedRank] = useState('Q')
   const [selectedCardIds, setSelectedCardIds] = useState<string[]>([])
-  const [gameEndSummary, setGameEndSummary] = useState<{ finishedPlayers: string[] } | null>(null)
+  const [gameEndSummary, setGameEndSummary] = useState<{
+    finishedPlayers: string[]
+    playerNames?: Record<string, string>
+  } | null>(null)
   const match = useMatch('/:roomId')
   const roomId = match?.params.roomId
   const shareUrl = `${window.location.origin}/${roomState.id}`
@@ -71,7 +74,6 @@ export function Room({ roomSession }: RoomProps) {
       }, {}),
     [roomState.users],
   )
-
   useEffect(() => {
     if (!socket) {
       return
@@ -114,10 +116,16 @@ export function Room({ roomSession }: RoomProps) {
         }
       })
     })
-    socket.on('game_end', (payload: { finishedPlayers?: string[] }) => {
-      setGameStatus('game_end')
-      setGameEndSummary({ finishedPlayers: payload.finishedPlayers ?? [] })
-    })
+    socket.on(
+      'game_end',
+      (payload: { finishedPlayers?: string[]; playerNames?: Record<string, string> }) => {
+        setGameStatus('game_end')
+        setGameEndSummary({
+          finishedPlayers: payload.finishedPlayers ?? [],
+          playerNames: payload.playerNames,
+        })
+      },
+    )
 
     return () => {
       socket.off('room:state', onRoomState)
@@ -185,6 +193,7 @@ export function Room({ roomSession }: RoomProps) {
         lastMessage={lastMessage}
         currentTurnPlayerId={turnUpdate?.currentPlayerId ?? ''}
         turnSecondsLeft={turnUpdate?.secondsLeft}
+        gameEnded={isGameEnd}
       />
 
       {roomStatus === 'waiting' ? (
@@ -204,6 +213,7 @@ export function Room({ roomSession }: RoomProps) {
         <RankingBoard
           ranking={gameEndSummary?.finishedPlayers ?? []}
           nameBySocketId={nameBySocketId}
+          playerNamesFromGame={gameEndSummary?.playerNames}
         />
       ) : (
         <Paper className="game-shell" elevation={0}>

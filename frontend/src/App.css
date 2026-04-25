@@ -63,11 +63,37 @@
   text-align: center;
 }
 
-.lobby-seat__turn-indicator {
-  color: #22c55e;
-  font-size: 0.78rem;
-  font-weight: 700;
-  text-align: center;
+.lobby-seat__turn-timer {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 2px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.lobby-seat__turn-timer-icon {
+  color: #f8fafc !important;
+  font-size: 1rem !important;
+}
+
+.lobby-seat__turn-timer-seconds {
+  color: #f8fafc !important;
+  font-size: 0.95rem !important;
+  font-weight: 800 !important;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.lobby-seat__turn-timer-unit {
+  color: rgba(248, 250, 252, 0.85) !important;
+  font-size: 0.8rem !important;
+  font-weight: 700 !important;
+  line-height: 1;
 }
 
 .lobby-seat__message {

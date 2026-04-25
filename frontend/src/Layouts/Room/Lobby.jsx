@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Avatar, Box, Typography } from '@mui/material'
+import AccessTimeIcon from '@mui/icons-material/AccessTime'
 import crownImg from '../../assets/crown.png'
 import { getCharacterImageUrlByIndex, getCharacterCount } from '../../assets/characters/characterImageSources'
 import { theme1 } from '../../theme/theme1'
 
-export function Lobby({ room, lastMessage, currentTurnPlayerId, turnSecondsLeft }) {
+export function Lobby({ room, lastMessage, currentTurnPlayerId, turnSecondsLeft, gameEnded = false }) {
   const themeId = theme1.pokerFelt.green.characterFolder
   const totalCharacters = getCharacterCount(themeId)
   const [messageBubbles, setMessageBubbles] = useState({})
@@ -33,7 +34,7 @@ export function Lobby({ room, lastMessage, currentTurnPlayerId, turnSecondsLeft 
         {room.users.map((user) => {
           const avatarUrl = getCharacterImageUrlByIndex(themeId, Math.min(user.characterIndex, totalCharacters - 1))
           const isHost = user.socketId === room.hostSocketId
-          const isCurrentTurn = Boolean(currentTurnPlayerId && user.socketId === currentTurnPlayerId)
+          const isCurrentTurn = Boolean(!gameEnded && currentTurnPlayerId && user.socketId === currentTurnPlayerId)
           return (
             <Box key={user.socketId} className="lobby-seat">
               <Box sx={{ position: 'relative' }}>
@@ -55,9 +56,23 @@ export function Lobby({ room, lastMessage, currentTurnPlayerId, turnSecondsLeft 
               </Box>
               <Typography className="lobby-seat__name">{user.name}</Typography>
               {isCurrentTurn ? (
-                <Typography className="lobby-seat__turn-indicator">
-                  Turn{typeof turnSecondsLeft === 'number' ? ` - ${Math.max(0, turnSecondsLeft)}s` : ''}
-                </Typography>
+                <Box className="lobby-seat__turn-timer" aria-label="Turn time remaining">
+                  <AccessTimeIcon className="lobby-seat__turn-timer-icon" fontSize="small" />
+                  {typeof turnSecondsLeft === 'number' ? (
+                    <>
+                      <Typography className="lobby-seat__turn-timer-seconds" component="span">
+                        {Math.max(0, turnSecondsLeft)}
+                      </Typography>
+                      <Typography className="lobby-seat__turn-timer-unit" component="span">
+                        s
+                      </Typography>
+                    </>
+                  ) : (
+                    <Typography className="lobby-seat__turn-timer-seconds" component="span">
+                      —
+                    </Typography>
+                  )}
+                </Box>
               ) : null}
               {messageBubbles[user.socketId] ? (
                 <Typography className="lobby-seat__message">{messageBubbles[user.socketId]}</Typography>

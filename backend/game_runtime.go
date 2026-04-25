@@ -45,6 +45,9 @@ type GameState struct {
 	LastPlayedCards   []Card
 	PassCount         int
 	FinishedPlayers   []string
+	// PlayerNames is filled at game start from room users and kept for game_end
+	// so rankings still show display names after players leave.
+	PlayerNames       map[string]string
 	CurrentTurnEndsAt time.Time
 }
 
@@ -163,6 +166,11 @@ func (s *roomStore) initializeGameLocked(state *RoomState) *GameState {
 		hands[playerID] = append(hands[playerID], c)
 	}
 
+	playerNames := make(map[string]string, len(state.Users))
+	for _, u := range state.Users {
+		playerNames[u.SocketID] = u.Name
+	}
+
 	return &GameState{
 		RoomID:            state.ID,
 		Status:            roomStatusInRound,
@@ -176,6 +184,7 @@ func (s *roomStore) initializeGameLocked(state *RoomState) *GameState {
 		LastPlayedCards:   nil,
 		PassCount:         0,
 		FinishedPlayers:   []string{},
+		PlayerNames:       playerNames,
 		CurrentTurnEndsAt: time.Now().Add(time.Duration(state.TurnSeconds) * time.Second),
 	}
 }
@@ -601,9 +610,14 @@ func (s *roomStore) tryEndGameLocked(io *server.Server, state *RoomState, game *
 	game.Status = roomStatusGameEnd
 	state.Status = roomStatusGameEnd
 	s.stopTimerLocked(state.ID)
+	playerNames := map[string]any{}
+	for k, v := range game.PlayerNames {
+		playerNames[k] = v
+	}
 	io.To(server.Room(state.ID)).Emit("game_end", map[string]any{
 		"roomId":           state.ID,
 		"finishedPlayers":  append([]string(nil), game.FinishedPlayers...),
+		"playerNames":      playerNames,
 		"playerCardCounts": s.playerCardCountsLocked(game),
 	})
 	return true

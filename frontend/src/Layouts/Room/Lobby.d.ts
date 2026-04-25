@@ -28,4 +28,5 @@ export const Lobby: ComponentType<{
   lastMessage: LobbyMessage | null
   currentTurnPlayerId?: string
   turnSecondsLeft?: number
+  gameEnded?: boolean
 }>
