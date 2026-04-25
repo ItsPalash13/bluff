@@ -216,12 +216,15 @@ func (s *roomStore) playBet(io *server.Server, socketID string, p gamePlayBetPay
 	game.Pile = append(game.Pile, selectedCards...)
 	game.LastPlayedCards = selectedCards
 
+	previousLastBettor := game.LastBetPlayerID
 	if game.CurrentBet == nil {
 		game.FirstBetPlayerID = socketID
 	}
 	game.CurrentBet = &BetState{Rank: p.Rank, Count: p.Count, PlayerID: socketID}
 	game.LastBetPlayerID = socketID
 	game.PassCount = 0
+	// A new valid bet resolves the previous last bettor's unresolved responsibility.
+	s.recordIfFinishedLocked(game, previousLastBettor)
 	s.recordIfFinishedLocked(game, socketID)
 	if s.tryEndGameLocked(io, state, game) {
 		return "", ""
@@ -306,23 +309,26 @@ func (s *roomStore) callBluff(io *server.Server, socketID string) (string, strin
 		}
 	}
 
+	lastBettorID := game.LastBetPlayerID
 	targetPlayerID := socketID
-	nextStarterID := game.LastBetPlayerID
+	nextStarterID := lastBettorID
 	if bluffCaught {
-		targetPlayerID = game.LastBetPlayerID
+		targetPlayerID = lastBettorID
 		nextStarterID = socketID
 	}
 	game.Hands[targetPlayerID] = append(game.Hands[targetPlayerID], game.Pile...)
 	io.To(server.Room(state.ID)).Emit("bluff_result", map[string]any{
 		"callerId":     socketID,
-		"targetId":     game.LastBetPlayerID,
+		"targetId":     lastBettorID,
 		"bluffCaught":  bluffCaught,
 		"pileReceiver": targetPlayerID,
 	})
 
 	s.resetRoundLocked(game, nextStarterID)
-	s.recordIfFinishedLocked(game, game.LastBetPlayerID)
+	// Bluff resolution resolves the previous last bet.
+	s.recordIfFinishedLocked(game, lastBettorID)
 	s.recordIfFinishedLocked(game, socketID)
+	s.recordIfFinishedLocked(game, targetPlayerID)
 	if s.tryEndGameLocked(io, state, game) {
 		return "", ""
 	}
@@ -380,12 +386,18 @@ func (s *roomStore) onTimerTick(io *server.Server, roomID string) {
 }
 
 func (s *roomStore) flushRoundLocked(io *server.Server, state *RoomState, game *GameState, byPlayerID string) {
+	lastBettorID := game.LastBetPlayerID
 	io.To(server.Room(state.ID)).Emit("round_reset", map[string]any{
 		"reason": "pass_flush",
 		"by":     byPlayerID,
 	})
 	nextStarter := s.nextActiveAfterLocked(game, game.FirstBetPlayerID)
 	s.resetRoundLocked(game, nextStarter)
+	// Flush resolves the last unresolved bet.
+	s.recordIfFinishedLocked(game, lastBettorID)
+	if s.tryEndGameLocked(io, state, game) {
+		return
+	}
 	s.resetTurnDeadlineLocked(state, game)
 	s.emitTurnUpdateLocked(io, state, game)
 }
@@ -569,6 +581,10 @@ func (s *roomStore) recordIfFinishedLocked(game *GameState, playerID string) {
 	if playerID == "" {
 		return
 	}
+	// A zero-card last bettor is still active until that bet is resolved.
+	if game.CurrentBet != nil && game.LastBetPlayerID == playerID {
+		return
+	}
 	if len(game.Hands[playerID]) != 0 {
 		return
 	}
@@ -605,7 +621,7 @@ func (s *roomStore) getRoomAndGameBySocketLocked(socketID string) (*RoomState, *
 func (s *roomStore) activePlayerCountLocked(game *GameState) int {
 	count := 0
 	for _, id := range game.TurnOrder {
-		if len(game.Hands[id]) > 0 {
+		if s.isActiveForRoundLocked(game, id) {
 			count++
 		}
 	}
@@ -614,7 +630,7 @@ func (s *roomStore) activePlayerCountLocked(game *GameState) int {
 
 func (s *roomStore) currentPlayerHasCardsLocked(game *GameState) bool {
 	playerID := game.currentPlayerID()
-	return len(game.Hands[playerID]) > 0
+	return s.isActiveForRoundLocked(game, playerID)
 }
 
 func (g *GameState) currentPlayerID() string {
@@ -658,11 +674,21 @@ func (s *roomStore) nextActiveAfterLocked(game *GameState, playerID string) stri
 	for i := 0; i < len(game.TurnOrder); i++ {
 		idx = (idx + 1) % len(game.TurnOrder)
 		nextID := game.TurnOrder[idx]
-		if len(game.Hands[nextID]) > 0 {
+		if s.isActiveForRoundLocked(game, nextID) {
 			return nextID
 		}
 	}
 	return game.currentPlayerID()
+}
+
+func (s *roomStore) isActiveForRoundLocked(game *GameState, playerID string) bool {
+	if playerID == "" {
+		return false
+	}
+	if len(game.Hands[playerID]) > 0 {
+		return true
+	}
+	return game.CurrentBet != nil && game.LastBetPlayerID == playerID
 }
 
 func (s *roomStore) resetTurnDeadlineLocked(state *RoomState, game *GameState) {

@@ -150,7 +150,9 @@ On timeout:
 
 ## 9. Player Completion and Ranking
 
-When a player has 0 cards:
+### 9.1 Completion baseline
+
+When a player has `0` cards:
 
 - remove from `activePlayers`
 - append to `finishedPlayers`
@@ -167,6 +169,30 @@ Important: completion checks happen after:
 - move
 - bluff resolution
 - penalty assignment
+
+### 9.2 Unresolved last-bet responsibility rule
+
+A player is **not** immediately finished just because their hand reaches `0` during a bet.
+
+If a player's hand becomes `0` and that player is still the `lastBetPlayer` for the current unresolved pile, they remain active for round responsibility until that bet is resolved.
+
+A last bet is considered resolved only when one of the following happens:
+
+1. a subsequent valid bet is played on top of it
+2. bluff is called and resolved
+3. round ends through valid pass-loop flush
+
+Until one of those resolution events occurs:
+
+- the `lastBetPlayer` cannot be marked finished
+- they are still considered active in round context
+- they cannot bypass challenge responsibility for that unresolved pile
+
+After resolution:
+
+- if that player's hand is still `0`, then mark them finished
+- remove from active turn rotation
+- append to ranking in finish order
 
 ## 10. Game End (`GAME_END`)
 
