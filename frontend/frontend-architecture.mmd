@@ -1,27 +1,27 @@
-%% Bluff frontend — components, themes, and wiring (Mermaid)
+%% Bluff frontend — entry, shell, room/game UI, and socket-driven state (Mermaid)
 %% Open in a Mermaid viewer, or include in a .md file with a ```mermaid fence.
 
 flowchart TB
   subgraph entry["Entry: main.tsx"]
     M[main.tsx]
     M --> RDX[Redux Provider + store]
-    RDX --> TP[ThemeProvider + mainTheme.green + CssBaseline]
+    RDX --> TP[ThemeProvider + mainTheme + CssBaseline]
     TP --> BR[BrowserRouter]
     BR --> A[App]
   end
 
   subgraph themeLayer["Theme layer"]
-    T1[theme1.ts: felt tokens, characterFolder, gradients]
+    T1[theme1.ts: felt, characterFolder, gradients]
     MT[mainTheme.ts: MUI createTheme, palette, CssBaseline bg]
     T1 --> MT
   end
 
   TP -.->|uses| MT
 
-  subgraph state["State (Redux)"]
+  subgraph state["State"]
     ST[store.ts]
-    US[uiSlice: commentOpen, etc.]
-    HK[hooks: typed useDispatch / useSelector]
+    US[uiSlice: commentOpen]
+    HK[hooks: useAppDispatch, useAppSelector]
     ST --> US
   end
 
@@ -30,51 +30,81 @@ flowchart TB
   A --> US
 
   subgraph app["App.tsx"]
-    SP[SocketProvider — socket.io context]
-    AS[AppShell]
+    SP[SocketProvider: io client, ensureConnected, disconnect]
+    AS[AppShell: session, routes, connect gate]
     SP --> AS
-    AS --> RU["Routes: / and /:roomId → Room"]
-    AS --> CB[CommentBox]
   end
 
   A --> SP
   AS --> US
 
-  subgraph roomView["Room flow"]
-    Room[Room.tsx]
-    Lobby[Lobby.jsx]
-    CCS[CharacterCardSelector]
-    CIS[characterImageSources / characterAvatarTypes]
-    T1a[theme1 — character pack id]
-    Room --> Lobby
-    Room --> CCS
-    CCS --> CIS
-    Room --> T1a
-    Lobby --> CIS
-    Lobby --> T1a
+  subgraph preRoom["Pre-room: not joined yet"]
+    CNJ[CreateNJoin: name, character, create or join by code]
+    CNJ --> SP
+    CNJ --> T1a[CharacterCardSelector + characterImageSources, theme1]
   end
 
-  RU --> Room
+  subgraph inRoom["In-room: roomSession set — Room only"]
+    Room[Room.tsx]
+    Lobby[Lobby: seats, turn ring, AccessTime + timer]
+    RSS[RoomSettings: host, start — waiting only]
+    RB[RankingBoard: game_end only]
+    GameUI[In-game: bet, pass, bluff, hand selection]
+    Room --> Lobby
+    Room --> RSS
+    Room --> RB
+    Room --> GameUI
+  end
+
+  CBX[CommentBox: room chat — over Room when open]
+
+  AS -->|connecting or / without session| CNJ
+  AS -->|roomSession| inRoom
+  AS --> CBX
+
   Room --> SP
   Room --> US
+  Room --> MT
+  CBX --> SP
+  CBX --> US
 
-  subgraph assets["Asset components (not imported by Room/App yet)"]
-    PC[PlayingCard + playingCardSources/Types + PlayingCard.css]
-    CA[CharacterAvatar]
-    RS[RoomSettings]
+  subgraph shared["Shared types: roomTypes.ts"]
+    types[RoomState, RoomUser, RoomMessage, TurnUpdatePayload, GameCard, ...]
   end
+
+  Room --> types
+  CNJ --> types
+
+  subgraph socketIn["Client listens"]
+    L1[room:state, room:message]
+    L2[setup_start, game_start, turn_update, timer_tick, game_end]
+  end
+
+  Room --> socketIn
+
+  subgraph socketOut["Client emits"]
+    E1[room:updateSettings, room:start, room:message]
+    E2[game:play_bet, game:pass, game:call_bluff]
+  end
+
+  Room --> E1
+  Room --> E2
+  CNJ -->|room:create, room:join| socketOut
 
   subgraph styles["Global CSS"]
     IC[index.css]
-    AC[App.css — Room]
+    AC[App.css: room, game-shell, ranking, lobby-timer]
   end
 
   M --> IC
   Room --> AC
 
-  CB -->|MUI useTheme| MT
+  subgraph optionalAssets["Optional or legacy assets"]
+    PC[PlayingCard, card image sources]
+    CAV[CharacterAvatar, CharacterCardSelector in CreateNJoin]
+  end
 
   classDef theme fill:#1a3d2e,color:#e8f5e9
   classDef data fill:#1e2a4a,color:#e3e8ff
   class T1,MT,TP theme
-  class ST,US,HK,SP data
+  class ST,US,HK,SP,types data

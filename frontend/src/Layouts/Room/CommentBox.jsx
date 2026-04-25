@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
-import { IconButton, Paper, Stack, TextField, useMediaQuery } from '@mui/material'
-import CloseIcon from '@mui/icons-material/Close'
-import ChatIcon from '@mui/icons-material/Chat'
+import ClickAwayListener from '@mui/material/ClickAwayListener'
+import { IconButton, InputBase, Paper, Stack, useMediaQuery } from '@mui/material'
+import SendIcon from '@mui/icons-material/Send'
 import { useTheme } from '@mui/material/styles'
 
 const QUICK_EMOJIS = ['😀', '😂', '👍', '🔥', '🎉']
@@ -27,65 +27,79 @@ export function CommentBox({ open, onClose, onSend }) {
   }
 
   return (
-    <Paper
-      elevation={0}
-      sx={{
-        position: 'fixed',
-        left: isMobile ? 0 : '50%',
-        transform: isMobile ? 'none' : 'translateX(-50%)',
-        bottom: 16,
-        width: isMobile ? '100vw' : 460,
-        borderRadius: isMobile ? '14px 14px 0 0' : '14px',
-        p: 1.5,
-        zIndex: 1400,
-        background: 'transparent',
-        border: 'none',
-        boxShadow: 'none',
-      }}
-    >
-      <Stack spacing={1}>
-        <Stack direction="row" spacing={0.5}>
-          {QUICK_EMOJIS.map((emoji) => (
-            <IconButton
-              key={emoji}
-              size="small"
-              onClick={() => setDraftMessage((prev) => `${prev}${emoji}`)}
-              sx={{ color: '#f8fafc' }}
-            >
-              <span>{emoji}</span>
-            </IconButton>
-          ))}
-        </Stack>
+    <ClickAwayListener onClickAway={handleClose}>
+      <Paper
+        elevation={0}
+        sx={{
+          position: 'fixed',
+          left: isMobile ? 0 : '50%',
+          transform: isMobile ? 'none' : 'translateX(-50%)',
+          bottom: 16,
+          width: isMobile ? '100vw' : 400,
+          maxWidth: '100%',
+          borderRadius: isMobile ? '14px 14px 0 0' : 14,
+          p: 1.5,
+          zIndex: 1400,
+          background: 'transparent',
+          border: 'none',
+          boxShadow: 'none',
+        }}
+      >
+        <Stack spacing={1}>
+          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+            {QUICK_EMOJIS.map((emoji) => (
+              <IconButton
+                key={emoji}
+                size="small"
+                onClick={() => setDraftMessage((prev) => `${prev}${emoji}`)}
+                sx={{ color: '#f8fafc' }}
+              >
+                <span>{emoji}</span>
+              </IconButton>
+            ))}
+          </Stack>
 
-        <Stack direction="row" spacing={1}>
-          <IconButton aria-label="Cancel comment" sx={{ color: '#f8fafc' }} onClick={handleClose}>
-            <CloseIcon />
-          </IconButton>
-          <TextField
-            fullWidth
-            size="small"
-            value={draftMessage}
-            onChange={(e) => setDraftMessage(e.target.value)}
-            placeholder="Type a comment..."
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault()
-                handleSend()
-              }
+          <Paper
+            component="form"
+            onSubmit={(e) => {
+              e.preventDefault()
+              handleSend()
             }}
             sx={{
-              '& .MuiInputBase-root': {
-                color: '#0f172a',
-                background: '#ffffff',
-                borderRadius: '10px',
-              },
+              p: '2px 4px',
+              display: 'flex',
+              alignItems: 'center',
+              width: '100%',
+              borderRadius: '10px',
+              background: '#ffffff',
             }}
-          />
-          <IconButton aria-label="Send comment" sx={{ color: '#f8fafc' }} disabled={!canSend} onClick={handleSend}>
-            <ChatIcon />
-          </IconButton>
+          >
+            <InputBase
+              sx={{ ml: 1, flex: 1, color: '#0f172a' }}
+              placeholder="Type a comment..."
+              value={draftMessage}
+              onChange={(e) => setDraftMessage(e.target.value)}
+              inputProps={{ 'aria-label': 'type a comment' }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  handleSend()
+                }
+              }}
+            />
+            <IconButton
+              type="button"
+              color="primary"
+              sx={{ p: '10px' }}
+              aria-label="Send comment"
+              disabled={!canSend}
+              onClick={handleSend}
+            >
+              <SendIcon />
+            </IconButton>
+          </Paper>
         </Stack>
-      </Stack>
-    </Paper>
+      </Paper>
+    </ClickAwayListener>
   )
 }

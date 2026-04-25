@@ -11,12 +11,15 @@ export function Lobby({ room, lastMessage, currentTurnPlayerId, turnSecondsLeft,
   const [messageBubbles, setMessageBubbles] = useState({})
 
   const bubbleTimeoutMs = 1000
+  const maxBubbleChars = 50
 
   useEffect(() => {
     if (!lastMessage?.socketId || !lastMessage.message) return
+    const normalizedMessage = lastMessage.message.trim().slice(0, maxBubbleChars)
+    if (!normalizedMessage) return
     setMessageBubbles((prev) => ({
       ...prev,
-      [lastMessage.socketId]: lastMessage.message,
+      [lastMessage.socketId]: normalizedMessage,
     }))
     const timeout = setTimeout(() => {
       setMessageBubbles((prev) => {
@@ -35,9 +38,15 @@ export function Lobby({ room, lastMessage, currentTurnPlayerId, turnSecondsLeft,
           const avatarUrl = getCharacterImageUrlByIndex(themeId, Math.min(user.characterIndex, totalCharacters - 1))
           const isHost = user.socketId === room.hostSocketId
           const isCurrentTurn = Boolean(!gameEnded && currentTurnPlayerId && user.socketId === currentTurnPlayerId)
+          const bubbleMessage = messageBubbles[user.socketId]
           return (
             <Box key={user.socketId} className="lobby-seat">
               <Box sx={{ position: 'relative' }}>
+                {bubbleMessage ? (
+                  <Box className="lobby-seat__message-tooltip" role="status" aria-live="polite">
+                    <Typography className="lobby-seat__message">{bubbleMessage}</Typography>
+                  </Box>
+                ) : null}
                 <Avatar
                   src={avatarUrl}
                   alt={user.name}
@@ -73,9 +82,6 @@ export function Lobby({ room, lastMessage, currentTurnPlayerId, turnSecondsLeft,
                     </Typography>
                   )}
                 </Box>
-              ) : null}
-              {messageBubbles[user.socketId] ? (
-                <Typography className="lobby-seat__message">{messageBubbles[user.socketId]}</Typography>
               ) : null}
             </Box>
           )

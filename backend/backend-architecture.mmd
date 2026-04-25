@@ -1,4 +1,4 @@
-%% Bluff backend — entry, database, socket server, and room flow (Mermaid)
+%% Bluff backend — HTTP entry, Mongo bootstrap, socket server, room + game runtime (Mermaid)
 %% Open in a Mermaid viewer, or include in a .md file with a ```mermaid fence.
 
 flowchart TB
@@ -11,9 +11,9 @@ flowchart TB
   end
 
   subgraph http["net/http on :8080"]
-    H1["/socket.io/ → io.ServeHandler — Socket.IO"]
-    H2["/ — JSON: server info"]
-    H3["/health — JSON status ok"]
+    H1["/socket.io/ — Socket.IO v3 zishang520"]
+    H2["/ — JSON server info"]
+    H3["/health — health JSON"]
   end
 
   M --> H1
@@ -21,89 +21,95 @@ flowchart TB
   M --> H3
   SRV --> H1
 
-  subgraph dbpkg["db.go — MongoDB"]
-    INIT[InitMongo: MONGODB_URI, optional MONGODB_DB default bluff]
-    PING[Ping primary read preference]
-    CLI[Client global + DB global + cleanup on defer]
-    INIT --> PING --> CLI
+  subgraph dbpkg["db.go — MongoDB optional bootstrap"]
+    INIT[InitMongo: MONGODB_URI, MONGODB_DB]
+    PING[Ping primary]
+    INIT --> PING
   end
 
   MONGO --> dbpkg
 
   subgraph noteDb["Note"]
-    N1[Room state is in-memory roomStore, not Mongo yet.]
+    N1[Runtime room and game state is in-memory roomStore, not Mongo yet.]
   end
   MONGO -.-> N1
 
-  subgraph skt["socket.go — Socket.IO v3 (zishang520)"]
-    OPT[DefaultServerOptions + CORS localhost:5173]
+  subgraph skt["socket.go — connection wiring"]
+    OPT[CORS localhost:5173, credentials]
     IO[server.NewServer]
-    RS[roomStore: mutex, rooms map, socketToRoom map]
-    TYPES[RoomState, RoomUser, room payloads]
+    RS[roomStore: rooms, socketToRoom, games, turnTimers]
     OPT --> IO
     IO --> RS
-    IO --> TYPES
   end
 
   SRV --> skt
 
-  subgraph handlers["Per-socket event handlers"]
+  subgraph gamefile["game_runtime.go — bluff game logic"]
+    GS[GameState: hands, pile, bet, passCount, turnOrder, finishedPlayers, PlayerNames]
+    SG[startGame: setup, deal, turn timer]
+    GP[playBet, passTurn, callBluff]
+    TT[onTimerTick: timer_tick, timeout as pass or flush]
+    DC[handlePlayerDepartureLocked: leave/disconnect reconciliation]
+    AR[tryAutoResolveZeroCardLastBettor: pass-loop edge case]
+    SG --> GS
+    GP --> GS
+    TT --> GP
+    DC --> GP
+  end
+
+  RS --> gamefile
+  socketfile[socket leaveRoom/removeFromRoom] --> DC
+
+  subgraph handlers["Per-socket events"]
     C[connection]
-    E1[room:create]
-    E2[room:join]
-    E3[room:leave]
-    E4[room:message]
-    E5[disconnect]
-    C --> E1
-    C --> E2
-    C --> E3
-    C --> E4
-    C --> E5
+    R1[room:create, room:join, room:leave]
+    R2[room:updateSettings, room:message]
+    R3[room:start — delegates startGame]
+    G1[game:play_bet, game:pass, game:call_bluff]
+    D1[disconnect]
+    C --> R1
+    C --> R2
+    C --> R3
+    C --> G1
+    C --> D1
   end
 
   IO --> C
+  R3 --> gamefile
+  G1 --> gamefile
+  R1 --> socketfile
+  D1 --> socketfile
 
-  subgraph storeOps["roomStore methods"]
-    CR[createRoom — 6-char code, capacity 4]
-    JR[joinRoom — ROOM_NOT_FOUND, ROOM_FULL]
-    LR[leaveRoom + host reassignment if host leaves]
-    GN[getSocketRoomAndName for chat]
-    CODES[generateUniqueRoomIDLocked, cloneRoomState]
+  subgraph roomOps["Room lifecycle in socket.go + store"]
+    JR[joinRoom: ROOM_NOT_JOINABLE if not waiting]
+    CR[createRoom, updateRoomSettings, host handoff on leave]
+  end
+  RS --> roomOps
+
+  subgraph outRoom["Emits: lobby"]
+    O1[room:created, room:joined, room:state, room:message, room:error]
   end
 
-  RS --> storeOps
-  E1 --> storeOps
-  E2 --> storeOps
-  E3 --> storeOps
-  E4 --> storeOps
-  E5 --> storeOps
-
-  subgraph out["Emits to clients"]
-    O1[room:created / room:joined to caller]
-    O2[room:state to room]
-    O3[room:message to room]
-    O4[room:error on validation / business rules]
+  subgraph outGame["Emits: gameplay to room namespace"]
+    G2["setup_start, game_start, turn_update, timer_tick, player_move, player_pass, bluff_called, bluff_result, round_reset, game_end (playerNames, card counts)"]
   end
 
-  storeOps --> O2
-  E1 --> O1
-  E2 --> O1
-  E4 --> O3
-  E1 --> O4
-  E2 --> O4
-  E4 --> O4
+  roomOps --> O1
+  gamefile --> outGame
+  socketfile --> O1
+  socketfile --> outGame
 
-  subgraph helpers["Helpers in socket.go"]
-    PV[parseRoomPayload, parseRoomMessagePayload]
-    VN[isValidName]
+  subgraph helpers["Helpers: socket.go"]
     EM[emitRoomState]
+    PV[parse payload helpers]
   end
 
   C --> helpers
+  C --> EM
 
   classDef entry fill:#1a2d3d,color:#e3f2fd
   classDef data fill:#1d3d2a,color:#e8f5e9
   classDef sk fill:#2d1f3d,color:#f3e5f5
   class M,ENV,SRV,H1,H2,H3 entry
-  class MONGO,INIT,CLI,RS data
-  class IO,OPT,C,E1,E2,E3,E4,E5 sk
+  class MONGO,INIT,RS,GS data
+  class IO,OPT,C,R1,R2,R3,G1,D1 sk

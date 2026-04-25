@@ -49,7 +49,12 @@ export function Room({ roomSession }: RoomProps) {
   const roomStatus = gameStatus || roomState.status || 'waiting'
   const canEdit = isHost && roomStatus === 'waiting'
   const mySocketId = socket?.id ?? ''
-  const rankOptions = ['A', 'K', 'Q', 'J', '10', '9', '8', '7', '6', '5', '4', '3', '2']
+  const rankOrder = ['A', 'K', 'Q', 'J', '10', '9', '8', '7', '6', '5', '4', '3', '2']
+  const rankOptions = useMemo(() => {
+    const hand = turnUpdate?.yourHand ?? []
+    const uniqueRanks = new Set(hand.map((card) => card.rank))
+    return rankOrder.filter((rank) => uniqueRanks.has(rank))
+  }, [turnUpdate])
 
   const isMyTurn = Boolean(turnUpdate && mySocketId && turnUpdate.currentPlayerId === mySocketId)
   const hasCurrentBet = Boolean(turnUpdate?.currentBet)
@@ -74,6 +79,13 @@ export function Room({ roomSession }: RoomProps) {
       }, {}),
     [roomState.users],
   )
+  useEffect(() => {
+    if (rankOptions.length === 0) return
+    if (!rankOptions.includes(selectedRank)) {
+      setSelectedRank(rankOptions[0])
+    }
+  }, [rankOptions, selectedRank])
+
   useEffect(() => {
     if (!socket) {
       return
@@ -262,11 +274,16 @@ export function Room({ roomSession }: RoomProps) {
                   <InputLabel id="rank-label">Rank</InputLabel>
                   <Select
                     labelId="rank-label"
-                    value={selectedRank}
+                    value={rankOptions.includes(selectedRank) ? selectedRank : ''}
                     label="Rank"
                     onChange={(event) => setSelectedRank(event.target.value)}
                     disabled={!isMyTurn || !isInRound}
                   >
+                    {rankOptions.length === 0 ? (
+                      <MenuItem disabled value="">
+                        No ranks available
+                      </MenuItem>
+                    ) : null}
                     {rankOptions.map((rank) => (
                       <MenuItem key={rank} value={rank}>
                         {rank}
