@@ -25,3 +25,31 @@ export type RoomSession = {
   room: RoomState
   name: string
 }
+
+export type GameCard = {
+  id: string
+  rank: string
+  suit: string
+}
+
+export type GameBet = {
+  rank: string
+  count: number
+  playerId: string
+}
+
+export type TurnUpdatePayload = {
+  roomId: string
+  status: string
+  currentPlayerId: string
+  secondsLeft: number
+  currentBet: GameBet | null
+  pileCount: number
+  lastBetPlayerId: string
+  firstBetPlayerId: string
+  passCount: number
+  finishedPlayers: string[]
+  playerCardCounts: Record<string, number>
+  yourPlayerId: string
+  yourHand: GameCard[]
+}

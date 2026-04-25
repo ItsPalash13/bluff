@@ -66,12 +66,16 @@ type roomStore struct {
 	mu           sync.Mutex
 	rooms        map[string]*RoomState
 	socketToRoom map[string]string
+	games        map[string]*GameState
+	turnTimers   map[string]chan struct{}
 }
 
 func newRoomStore() *roomStore {
 	return &roomStore{
 		rooms:        map[string]*RoomState{},
 		socketToRoom: map[string]string{},
+		games:        map[string]*GameState{},
+		turnTimers:   map[string]chan struct{}{},
 	}
 }
 
@@ -143,7 +147,7 @@ func newSocketServer() *server.Server {
 
 		socket.On("room:leave", func(args ...any) {
 			fmt.Printf("[socket] room:leave from=%s\n", socketID)
-			state, previousRoomID := store.leaveRoom(socketID)
+			state, previousRoomID := store.leaveRoom(io, socketID)
 			if previousRoomID != "" {
 				fmt.Printf("[socket] room:leave success socket=%s room=%s\n", socketID, previousRoomID)
 				socket.Leave(server.Room(previousRoomID))
@@ -201,7 +205,7 @@ func newSocketServer() *server.Server {
 			payload := parseRoomStartPayload(args)
 			fmt.Printf("[socket] room:start from=%s turnSeconds=%d totalCards=%d\n",
 				socketID, payload.TurnSeconds, payload.TotalCards)
-			state, errCode, errMsg := store.startRoom(socketID, payload)
+			state, errCode, errMsg := store.startGame(io, socketID, payload)
 			if errCode != "" {
 				fmt.Printf("[socket] room:start rejected socket=%s code=%s message=%q\n", socketID, errCode, errMsg)
 				socket.Emit("room:error", map[string]any{
@@ -215,6 +219,34 @@ func newSocketServer() *server.Server {
 			}
 		})
 
+		socket.On("game:play_bet", func(args ...any) {
+			payload := parseGamePlayBetPayload(args)
+			if errCode, errMsg := store.playBet(io, socketID, payload); errCode != "" {
+				socket.Emit("room:error", map[string]any{
+					"code":    errCode,
+					"message": errMsg,
+				})
+			}
+		})
+
+		socket.On("game:pass", func(args ...any) {
+			if errCode, errMsg := store.passTurn(io, socketID, "manual"); errCode != "" {
+				socket.Emit("room:error", map[string]any{
+					"code":    errCode,
+					"message": errMsg,
+				})
+			}
+		})
+
+		socket.On("game:call_bluff", func(args ...any) {
+			if errCode, errMsg := store.callBluff(io, socketID); errCode != "" {
+				socket.Emit("room:error", map[string]any{
+					"code":    errCode,
+					"message": errMsg,
+				})
+			}
+		})
+
 		socket.On("disconnect", func(args ...any) {
 			reason := ""
 			if len(args) > 0 {
@@ -225,7 +257,7 @@ func newSocketServer() *server.Server {
 				}
 			}
 			fmt.Printf("client disconnected: %s reason=%s\n", socketID, reason)
-			state, _ := store.leaveRoom(socketID)
+			state, _ := store.leaveRoom(io, socketID)
 			if state != nil {
 				emitRoomState(io, state)
 			}
@@ -348,7 +380,7 @@ func (s *roomStore) createRoom(socketID, name string, characterIndex int) *RoomS
 	defer s.mu.Unlock()
 
 	if oldRoomID, ok := s.socketToRoom[socketID]; ok {
-		s.removeFromRoomLocked(socketID, oldRoomID)
+		s.removeFromRoomLocked(nil, socketID, oldRoomID)
 	}
 
 	roomID := s.generateUniqueRoomIDLocked()
@@ -404,10 +436,9 @@ func (s *roomStore) updateRoomSettings(socketID string, p roomSettingsPayload) (
 		return nil, "INVALID_SETTINGS", "Invalid turn time."
 	}
 
-	minCards := p.Capacity * 13
 	totalCards := p.TotalCards
-	if !isAllowedTotalCards(totalCards) || totalCards < minCards {
-		return nil, "INVALID_SETTINGS", "Invalid total cards for the selected player count."
+	if !isAllowedTotalCards(totalCards) {
+		return nil, "INVALID_SETTINGS", "Invalid total cards."
 	}
 
 	state.TurnSeconds = p.TurnSeconds
@@ -441,8 +472,8 @@ func (s *roomStore) startRoom(socketID string, p roomStartPayload) (*RoomState, 
 	if !isAllowedTurnSeconds(p.TurnSeconds) {
 		return nil, "INVALID_SETTINGS", "Invalid turn time."
 	}
-	if !isAllowedTotalCards(p.TotalCards) || p.TotalCards < state.Capacity*13 {
-		return nil, "INVALID_SETTINGS", "Invalid total cards for the room capacity."
+	if !isAllowedTotalCards(p.TotalCards) {
+		return nil, "INVALID_SETTINGS", "Invalid total cards."
 	}
 
 	state.TurnSeconds = p.TurnSeconds
@@ -461,7 +492,7 @@ func (s *roomStore) joinRoom(socketID, roomID, name string, characterIndex int) 
 	}
 
 	if oldRoomID, ok := s.socketToRoom[socketID]; ok && oldRoomID != roomID {
-		s.removeFromRoomLocked(socketID, oldRoomID)
+		s.removeFromRoomLocked(nil, socketID, oldRoomID)
 	}
 
 	for _, user := range state.Users {
@@ -473,6 +504,9 @@ func (s *roomStore) joinRoom(socketID, roomID, name string, characterIndex int) 
 	if len(state.Users) >= state.Capacity {
 		return nil, "ROOM_FULL", "Room is full."
 	}
+	if state.Status != roomStatusWaiting {
+		return nil, "ROOM_NOT_JOINABLE", "Cannot join a room that has already started or finished."
+	}
 
 	state.Users = append(state.Users, RoomUser{
 		SocketID:       socketID,
@@ -483,7 +517,7 @@ func (s *roomStore) joinRoom(socketID, roomID, name string, characterIndex int) 
 	return cloneRoomState(state), "", ""
 }
 
-func (s *roomStore) leaveRoom(socketID string) (*RoomState, string) {
+func (s *roomStore) leaveRoom(io *server.Server, socketID string) (*RoomState, string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -492,7 +526,7 @@ func (s *roomStore) leaveRoom(socketID string) (*RoomState, string) {
 		return nil, ""
 	}
 
-	state := s.removeFromRoomLocked(socketID, roomID)
+	state := s.removeFromRoomLocked(io, socketID, roomID)
 	return state, roomID
 }
 
@@ -519,11 +553,32 @@ func (s *roomStore) getSocketRoomAndName(socketID string) (string, string, bool)
 	return "", "", false
 }
 
-func (s *roomStore) removeFromRoomLocked(socketID, roomID string) *RoomState {
+func (s *roomStore) removeFromRoomLocked(io *server.Server, socketID, roomID string) *RoomState {
 	state, exists := s.rooms[roomID]
 	if !exists {
 		delete(s.socketToRoom, socketID)
 		return nil
+	}
+
+	if game, ok := s.games[roomID]; ok {
+		wasCurrentTurn := game.currentPlayerID() == socketID
+		wasLastBettor := game.LastBetPlayerID == socketID
+		delete(game.Hands, socketID)
+		for idx := 0; idx < len(game.TurnOrder); idx++ {
+			if game.TurnOrder[idx] == socketID {
+				game.TurnOrder = append(game.TurnOrder[:idx], game.TurnOrder[idx+1:]...)
+				if len(game.TurnOrder) == 0 {
+					game.TurnIndex = 0
+				} else if game.TurnIndex >= len(game.TurnOrder) {
+					game.TurnIndex = 0
+				}
+				break
+			}
+		}
+		if io != nil {
+			outcome := s.handlePlayerDepartureLocked(io, state, game, socketID, wasCurrentTurn, wasLastBettor)
+			s.emitDepartureOutcomeLocked(io, state, game, outcome, socketID, "player_left")
+		}
 	}
 
 	nextUsers := make([]RoomUser, 0, len(state.Users))
@@ -538,6 +593,8 @@ func (s *roomStore) removeFromRoomLocked(socketID, roomID string) *RoomState {
 	delete(s.socketToRoom, socketID)
 
 	if len(state.Users) == 0 {
+		s.stopTimerLocked(roomID)
+		delete(s.games, roomID)
 		delete(s.rooms, roomID)
 		return nil
 	}

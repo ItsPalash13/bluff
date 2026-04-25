@@ -26,4 +26,6 @@ type LobbyMessage = {
 export const Lobby: ComponentType<{
   room: LobbyRoomState
   lastMessage: LobbyMessage | null
+  currentTurnPlayerId?: string
+  turnSecondsLeft?: number
 }>

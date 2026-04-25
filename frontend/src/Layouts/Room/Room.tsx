@@ -1,13 +1,26 @@
-import { useEffect, useState } from 'react'
-import { Box, IconButton } from '@mui/material'
+import { useEffect, useMemo, useState } from 'react'
+import {
+  Box,
+  Button,
+  FormControl,
+  FormControlLabel,
+  IconButton,
+  InputLabel,
+  MenuItem,
+  Paper,
+  Select,
+  Typography,
+  Checkbox,
+} from '@mui/material'
 import ChatIcon from '@mui/icons-material/Chat'
 import { useMatch } from 'react-router-dom'
 import { Lobby } from './Lobby'
 import { RoomSettings } from './RoomSettings'
+import { RankingBoard } from '../../components/RankingBoard'
 import { useAppSocket } from '../../state/SocketProvider'
 import { useAppDispatch, useAppSelector } from '../../store/hooks'
 import { setCommentOpen } from '../../store/uiSlice'
-import type { RoomMessage, RoomSession, RoomState } from '../roomTypes'
+import type { RoomMessage, RoomSession, RoomState, TurnUpdatePayload } from '../roomTypes'
 import '../../App.css'
 
 type RoomProps = {
@@ -20,12 +33,41 @@ export function Room({ roomSession }: RoomProps) {
   const commentOpen = useAppSelector((state) => state.ui.commentOpen)
   const [roomState, setRoomState] = useState<RoomState>(roomSession.room)
   const [lastMessage, setLastMessage] = useState<RoomMessage | null>(null)
+  const [turnUpdate, setTurnUpdate] = useState<TurnUpdatePayload | null>(null)
+  const [gameStatus, setGameStatus] = useState(roomSession.room.status || 'waiting')
+  const [selectedRank, setSelectedRank] = useState('Q')
+  const [selectedCount, setSelectedCount] = useState(1)
+  const [selectedCardIds, setSelectedCardIds] = useState<string[]>([])
+  const [gameEndSummary, setGameEndSummary] = useState<{ finishedPlayers: string[] } | null>(null)
   const match = useMatch('/:roomId')
   const roomId = match?.params.roomId
   const shareUrl = `${window.location.origin}/${roomState.id}`
   const isHost = Boolean(socket && roomState.hostSocketId === socket.id)
-  const roomStatus = roomState.status || 'waiting'
+  const roomStatus = gameStatus || roomState.status || 'waiting'
   const canEdit = isHost && roomStatus === 'waiting'
+  const mySocketId = socket?.id ?? ''
+  const rankOptions = ['A', 'K', 'Q', 'J', '10', '9', '8', '7', '6', '5', '4', '3', '2']
+
+  const isMyTurn = Boolean(turnUpdate && mySocketId && turnUpdate.currentPlayerId === mySocketId)
+  const hasCurrentBet = Boolean(turnUpdate?.currentBet)
+  const isSetup = roomStatus === 'setup'
+  const isInRound = roomStatus === 'in_round'
+  const isGameEnd = roomStatus === 'game_end'
+
+  const canSubmitBet = isInRound && isMyTurn && selectedCardIds.length > 0 && selectedCardIds.length <= 4
+  const canPass = isInRound && isMyTurn && hasCurrentBet
+  const canCallBluff = useMemo(() => {
+    if (!turnUpdate || !isInRound || !hasCurrentBet) return false
+    return turnUpdate.lastBetPlayerId !== mySocketId
+  }, [turnUpdate, isInRound, hasCurrentBet, mySocketId])
+  const nameBySocketId = useMemo(
+    () =>
+      roomState.users.reduce<Record<string, string>>((acc, user) => {
+        acc[user.socketId] = user.name
+        return acc
+      }, {}),
+    [roomState.users],
+  )
 
   useEffect(() => {
     if (!socket) {
@@ -36,6 +78,7 @@ export function Room({ roomSession }: RoomProps) {
       console.debug('[socket][room] room:state', nextState)
       if (nextState.id === roomId || nextState.id === roomState.id) {
         setRoomState(nextState)
+        setGameStatus(nextState.status || 'waiting')
       }
     }
 
@@ -46,12 +89,48 @@ export function Room({ roomSession }: RoomProps) {
 
     socket.on('room:state', onRoomState)
     socket.on('room:message', onRoomMessage)
+    socket.on('setup_start', () => {
+      setGameStatus('setup')
+      setGameEndSummary(null)
+    })
+    socket.on('game_start', () => {
+      setGameStatus('in_round')
+      setGameEndSummary(null)
+    })
+    socket.on('turn_update', (payload: TurnUpdatePayload) => {
+      setTurnUpdate(payload)
+      setGameStatus(payload.status || 'in_round')
+    })
+    socket.on('timer_tick', (payload: { playerId?: string; secondsLeft?: number }) => {
+      setTurnUpdate((prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          currentPlayerId: payload.playerId ?? prev.currentPlayerId,
+          secondsLeft: typeof payload.secondsLeft === 'number' ? payload.secondsLeft : prev.secondsLeft,
+        }
+      })
+    })
+    socket.on('game_end', (payload: { finishedPlayers?: string[] }) => {
+      setGameStatus('game_end')
+      setGameEndSummary({ finishedPlayers: payload.finishedPlayers ?? [] })
+    })
 
     return () => {
       socket.off('room:state', onRoomState)
       socket.off('room:message', onRoomMessage)
+      socket.off('setup_start')
+      socket.off('game_start')
+      socket.off('turn_update')
+      socket.off('timer_tick')
+      socket.off('game_end')
     }
   }, [socket, roomId, roomState.id])
+
+  useEffect(() => {
+    const safeCount = Math.min(4, Math.max(1, selectedCardIds.length || 1))
+    setSelectedCount(safeCount)
+  }, [selectedCardIds])
 
   const handleSettingsChange = (p: { turnSeconds: number; capacity: number; totalCards: number }) => {
     if (!socket) return
@@ -61,6 +140,36 @@ export function Room({ roomSession }: RoomProps) {
   const handleStart = (p: { turnSeconds: number; totalCards: number }) => {
     if (!socket) return
     socket.emit('room:start', p)
+  }
+
+  const handleToggleCard = (cardId: string) => {
+    setSelectedCardIds((prev) => {
+      if (prev.includes(cardId)) {
+        return prev.filter((id) => id !== cardId)
+      }
+      if (prev.length >= 4) return prev
+      return [...prev, cardId]
+    })
+  }
+
+  const handleSubmitBet = () => {
+    if (!socket || !canSubmitBet) return
+    socket.emit('game:play_bet', {
+      cardIds: selectedCardIds,
+      rank: selectedRank,
+      count: selectedCount,
+    })
+    setSelectedCardIds([])
+  }
+
+  const handlePass = () => {
+    if (!socket || !canPass) return
+    socket.emit('game:pass')
+  }
+
+  const handleCallBluff = () => {
+    if (!socket || !canCallBluff) return
+    socket.emit('game:call_bluff')
   }
 
   const handleCopyLink = async () => {
@@ -76,6 +185,8 @@ export function Room({ roomSession }: RoomProps) {
       <Lobby
         room={roomState}
         lastMessage={lastMessage}
+        currentTurnPlayerId={turnUpdate?.currentPlayerId ?? ''}
+        turnSecondsLeft={turnUpdate?.secondsLeft}
       />
 
       {roomStatus === 'waiting' ? (
@@ -91,7 +202,114 @@ export function Room({ roomSession }: RoomProps) {
             onShare={handleCopyLink}
           />
         </Box>
-      ) : null}
+      ) : isGameEnd ? (
+        <RankingBoard
+          ranking={gameEndSummary?.finishedPlayers ?? []}
+          nameBySocketId={nameBySocketId}
+        />
+      ) : (
+        <Paper className="game-shell" elevation={0}>
+          <Box className="game-top">
+            <Typography className="game-title">Game Status: {roomStatus.toUpperCase()}</Typography>
+            {isSetup ? <Typography className="game-note">Setting up game...</Typography> : null}
+            {turnUpdate ? (
+              <>
+                <Typography>Current Turn: {turnUpdate.currentPlayerId || '-'}</Typography>
+                <Typography>Timer: {Math.max(0, turnUpdate.secondsLeft ?? 0)}s</Typography>
+                {turnUpdate.currentBet ? (
+                  <Typography>
+                    Current Bet: {turnUpdate.currentBet.count} x {turnUpdate.currentBet.rank} by {turnUpdate.currentBet.playerId}
+                  </Typography>
+                ) : (
+                  <Typography>No active bet. Current player must initiate a new bet.</Typography>
+                )}
+                <Typography>Pile Cards: {turnUpdate.pileCount ?? 0}</Typography>
+                <Typography>
+                  Last Bet: {turnUpdate.currentBet ? `${turnUpdate.currentBet.count} x ${turnUpdate.currentBet.rank}` : 'None'}
+                </Typography>
+              </>
+            ) : (
+              <Typography>Waiting for game updates...</Typography>
+            )}
+          </Box>
+
+          <Box className="game-middle">
+            <Box
+              sx={{
+                display: 'flex',
+                gap: 1.5,
+                flexDirection: { xs: 'column', md: 'row' },
+                alignItems: { xs: 'stretch', md: 'center' },
+              }}
+            >
+              <FormControl size="small" className="game-control">
+                <InputLabel id="rank-label">Rank</InputLabel>
+                <Select
+                  labelId="rank-label"
+                  value={selectedRank}
+                  label="Rank"
+                  onChange={(event) => setSelectedRank(event.target.value)}
+                  disabled={!isMyTurn || !isInRound}
+                >
+                  {rankOptions.map((rank) => (
+                    <MenuItem key={rank} value={rank}>
+                      {rank}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+
+              <FormControl size="small" className="game-control">
+                <InputLabel id="count-label">Count</InputLabel>
+                <Select
+                  labelId="count-label"
+                  value={selectedCount}
+                  label="Count"
+                  onChange={(event) => setSelectedCount(Number(event.target.value))}
+                  disabled={!isMyTurn || !isInRound}
+                >
+                  {[1, 2, 3, 4].map((count) => (
+                    <MenuItem key={count} value={count}>
+                      {count}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+
+              <Button variant="contained" onClick={handleSubmitBet} disabled={!canSubmitBet}>
+                Submit Bet
+              </Button>
+              <Button variant="outlined" onClick={handlePass} disabled={!canPass}>
+                Pass
+              </Button>
+              <Button variant="outlined" color="warning" onClick={handleCallBluff} disabled={!canCallBluff}>
+                Call Bluff
+              </Button>
+            </Box>
+          </Box>
+
+          <Box className="game-bottom">
+            <Typography>
+              Your Cards: {turnUpdate?.yourHand?.length ?? 0}
+            </Typography>
+            <Box className="hand-list">
+              {(turnUpdate?.yourHand ?? []).map((card) => (
+                <FormControlLabel
+                  key={card.id}
+                  control={
+                    <Checkbox
+                      checked={selectedCardIds.includes(card.id)}
+                      onChange={() => handleToggleCard(card.id)}
+                      disabled={!isMyTurn || !isInRound || (!selectedCardIds.includes(card.id) && selectedCardIds.length >= 4)}
+                    />
+                  }
+                  label={`${card.rank}${card.suit}`}
+                />
+              ))}
+            </Box>
+          </Box>
+        </Paper>
+      )}
 
       <IconButton
         className="room-comment-fab"
