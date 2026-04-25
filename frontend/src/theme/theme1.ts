@@ -9,6 +9,8 @@ export const theme1 = {
     red: {
       /** Character pack folder under `assets/characters/imgs/`. */
       characterFolder: 'jpgs1',
+      /** Card pack folder under `assets/card/png/`. */
+      cardFolder: '2x',
       /** Used under gradients for overscroll / base fill. */
       fallback: '#0a0506',
       /**
@@ -21,6 +23,8 @@ export const theme1 = {
     green: {
       /** Character pack folder under `assets/characters/imgs/`. */
       characterFolder: 'jpgs1',
+      /** Card pack folder under `assets/card/png/`. */
+      cardFolder: '2x',
       fallback: '#040a06',
       appBackground:
         'radial-gradient(ellipse 150% 130% at 50% 44%, #2abb6e 0%, #1d9a58 14%, #0c4d2a 48%, #061f12 80%, #040a06 100%)',

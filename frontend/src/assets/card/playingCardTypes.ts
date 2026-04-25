@@ -9,6 +9,8 @@ export type StandardRank = PipRank | FaceRank
 export type CardRank = StandardRank | JokerColor
 
 export type PlayingCardProps = {
+  /** Card theme folder under `assets/card/png/`. */
+  themeId?: string
   label: CardLabel
   rank: CardRank
   className?: string

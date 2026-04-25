@@ -1,16 +1,8 @@
-const modules = import.meta.glob('./png/2x/*.png', {
-  eager: true,
-  import: 'default',
-}) as Record<string, string>
-
-const filenameToUrl = new Map<string, string>()
-for (const [path, url] of Object.entries(modules)) {
-  const m = path.match(/([^/\\]+)\.png$/)
-  if (m) filenameToUrl.set(m[1], url)
-}
+import { getCardImageUrl } from './cardImageSources'
 
 export function getPlayingCardImageUrl(
+  themeId: string,
   key: string,
 ): string | undefined {
-  return filenameToUrl.get(key)
+  return getCardImageUrl(themeId, key)
 }
