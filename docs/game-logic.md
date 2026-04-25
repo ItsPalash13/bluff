@@ -22,10 +22,11 @@ No player interaction; backend-only phase.
 
 ### Setup steps
 
-1. Select `N` cards based on host config.
-2. Shuffle deck.
-3. Shuffle player order.
-4. Distribute cards evenly.
+1. Build the full 52-card deck.
+2. Shuffle the full deck.
+3. Select the first `N` cards (host `totalCards`: 26, 39, or 52) from the shuffled deck—equivalent to a uniform random subset of size `N`.
+4. Shuffle player order.
+5. Distribute the `N` cards evenly in round-robin order.
 
 ### Transition to game
 

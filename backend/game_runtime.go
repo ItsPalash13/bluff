@@ -144,10 +144,17 @@ func (s *roomStore) startGame(io *server.Server, socketID string, p roomStartPay
 }
 
 func (s *roomStore) initializeGameLocked(state *RoomState) *GameState {
-	deck := buildDeck(state.TotalCards)
+	// Build full 52-card deck, shuffle, then take N (host totalCards) at random;
+	// do not take a fixed prefix in rank/suit order before shuffling.
+	deck := buildFullDeck()
 	roomRng.Shuffle(len(deck), func(i, j int) {
 		deck[i], deck[j] = deck[j], deck[i]
 	})
+	n := state.TotalCards
+	if n > len(deck) {
+		n = len(deck)
+	}
+	deck = deck[:n]
 
 	turnOrder := make([]string, 0, len(state.Users))
 	for _, user := range state.Users {
@@ -767,7 +774,7 @@ func (s *roomStore) stopTimerLocked(roomID string) {
 	}
 }
 
-func buildDeck(totalCards int) []Card {
+func buildFullDeck() []Card {
 	deck := make([]Card, 0, len(deckRanks)*len(deckSuits))
 	for _, rank := range deckRanks {
 		for _, suit := range deckSuits {
@@ -778,10 +785,7 @@ func buildDeck(totalCards int) []Card {
 			})
 		}
 	}
-	if totalCards > len(deck) {
-		totalCards = len(deck)
-	}
-	return deck[:totalCards]
+	return deck
 }
 
 func extractCardsFromHand(hand []Card, cardIDs []string) ([]Card, bool) {
