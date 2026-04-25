@@ -12,8 +12,11 @@ import (
 )
 
 const (
-	roomCodeLength = 6
-	roomCapacity   = 4
+	roomCodeLength     = 6
+	minRoomCapacity    = 2
+	maxRoomCapacity    = 4
+	defaultRoomCapacity = 2
+	roomStatusWaiting  = "waiting"
 )
 
 var (
@@ -31,6 +34,9 @@ type RoomState struct {
 	ID           string     `json:"id"`
 	HostSocketID string     `json:"hostSocketId"`
 	Capacity     int        `json:"capacity"`
+	Status       string     `json:"status"`
+	TurnSeconds  int        `json:"turnSeconds"`
+	TotalCards   int        `json:"totalCards"`
 	Users        []RoomUser `json:"users"`
 }
 
@@ -42,6 +48,12 @@ type roomPayload struct {
 
 type roomMessagePayload struct {
 	Message string `json:"message"`
+}
+
+type roomSettingsPayload struct {
+	TurnSeconds int `json:"turnSeconds"`
+	Capacity    int `json:"capacity"`
+	TotalCards  int `json:"totalCards"`
 }
 
 type roomStore struct {
@@ -161,6 +173,24 @@ func newSocketServer() *server.Server {
 			io.To(server.Room(roomID)).Emit("room:message", msg)
 		})
 
+		socket.On("room:updateSettings", func(args ...any) {
+			payload := parseRoomSettingsPayload(args)
+			fmt.Printf("[socket] room:updateSettings from=%s turnSeconds=%d capacity=%d totalCards=%d\n",
+				socketID, payload.TurnSeconds, payload.Capacity, payload.TotalCards)
+			state, errCode, errMsg := store.updateRoomSettings(socketID, payload)
+			if errCode != "" {
+				fmt.Printf("[socket] room:updateSettings rejected socket=%s code=%s message=%q\n", socketID, errCode, errMsg)
+				socket.Emit("room:error", map[string]any{
+					"code":    errCode,
+					"message": errMsg,
+				})
+				return
+			}
+			if state != nil {
+				emitRoomState(io, state)
+			}
+		})
+
 		socket.On("disconnect", func(args ...any) {
 			reason := ""
 			if len(args) > 0 {
@@ -230,6 +260,49 @@ func parseRoomMessagePayload(args []any) roomMessagePayload {
 	return payload
 }
 
+func parseRoomSettingsPayload(args []any) roomSettingsPayload {
+	if len(args) == 0 {
+		return roomSettingsPayload{}
+	}
+
+	raw, ok := args[0].(map[string]any)
+	if !ok {
+		return roomSettingsPayload{}
+	}
+
+	payload := roomSettingsPayload{}
+	payload.TurnSeconds = intFromJSON(raw["turnSeconds"])
+	payload.Capacity = intFromJSON(raw["capacity"])
+	payload.TotalCards = intFromJSON(raw["totalCards"])
+	return payload
+}
+
+func intFromJSON(v any) int {
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	case int64:
+		return int(n)
+	default:
+		return 0
+	}
+}
+
+func isAllowedTurnSeconds(n int) bool {
+	switch n {
+	case 15, 20, 30, 45, 60:
+		return true
+	default:
+		return false
+	}
+}
+
+func isAllowedTotalCards(n int) bool {
+	return n == 26 || n == 39 || n == 52
+}
+
 func (s *roomStore) createRoom(socketID, name string, characterIndex int) *RoomState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -242,7 +315,10 @@ func (s *roomStore) createRoom(socketID, name string, characterIndex int) *RoomS
 	state := &RoomState{
 		ID:           roomID,
 		HostSocketID: socketID,
-		Capacity:     roomCapacity,
+		Capacity:     defaultRoomCapacity,
+		Status:       roomStatusWaiting,
+		TurnSeconds:  30,
+		TotalCards:   26,
 		Users: []RoomUser{
 			{
 				SocketID:       socketID,
@@ -254,6 +330,50 @@ func (s *roomStore) createRoom(socketID, name string, characterIndex int) *RoomS
 	s.rooms[roomID] = state
 	s.socketToRoom[socketID] = roomID
 	return cloneRoomState(state)
+}
+
+func (s *roomStore) updateRoomSettings(socketID string, p roomSettingsPayload) (*RoomState, string, string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	roomID, ok := s.socketToRoom[socketID]
+	if !ok {
+		return nil, "ROOM_NOT_FOUND", "You are not in a room."
+	}
+
+	state, exists := s.rooms[roomID]
+	if !exists {
+		return nil, "ROOM_NOT_FOUND", "Room does not exist."
+	}
+
+	if state.HostSocketID != socketID {
+		return nil, "NOT_HOST", "Only the host can change room settings."
+	}
+
+	if state.Status != roomStatusWaiting {
+		return nil, "INVALID_ROOM_STATUS", "Settings can only be changed while the room is waiting."
+	}
+
+	if p.Capacity < minRoomCapacity || p.Capacity > maxRoomCapacity {
+		return nil, "INVALID_SETTINGS", "Player count must be between 2 and 4."
+	}
+	if p.Capacity < len(state.Users) {
+		return nil, "INVALID_SETTINGS", "Player count cannot be less than the number of players in the room."
+	}
+	if !isAllowedTurnSeconds(p.TurnSeconds) {
+		return nil, "INVALID_SETTINGS", "Invalid turn time."
+	}
+
+	minCards := p.Capacity * 13
+	totalCards := p.TotalCards
+	if !isAllowedTotalCards(totalCards) || totalCards < minCards {
+		return nil, "INVALID_SETTINGS", "Invalid total cards for the selected player count."
+	}
+
+	state.TurnSeconds = p.TurnSeconds
+	state.Capacity = p.Capacity
+	state.TotalCards = totalCards
+	return cloneRoomState(state), "", ""
 }
 
 func (s *roomStore) joinRoom(socketID, roomID, name string, characterIndex int) (*RoomState, string, string) {

@@ -1,31 +1,90 @@
-import { useMemo, useState } from 'react'
-import { Avatar, Box, Button, FormControl, InputLabel, MenuItem, Select, Stack, Typography } from '@mui/material'
+import { useEffect, useMemo, useState } from 'react'
+import { Box, Button, FormControl, InputLabel, MenuItem, Select, Stack, Typography } from '@mui/material'
+import type { SelectChangeEvent } from '@mui/material/Select'
 
 type RoomSettingsProps = {
-  name: string
-  selectedImage?: string
-  selectedIndex: number
-  totalCharacters: number
+  canEdit: boolean
+  roomStatus: string
+  turnSeconds: number
+  totalCards: number
+  /** Max players in room; must be ≥ minPlayers. */
+  capacity: number
+  minPlayers: 2 | 3 | 4
+  onSettingsChange: (p: { turnSeconds: number; capacity: number; totalCards: number }) => void
+  onShare: () => void
 }
 
-const TURN_TIME_OPTIONS = [15, 20, 30, 45, 60]
+const TURN_TIME_OPTIONS = [15, 20, 30, 45, 60] as const
 const PLAYER_OPTIONS = [2, 3, 4] as const
-const TOTAL_CARD_OPTIONS = [26, 39, 52]
+const TOTAL_CARD_OPTIONS = [26, 39, 52] as const
 
 export function RoomSettings({
-  name,
-  selectedImage,
-  selectedIndex,
-  totalCharacters,
+  canEdit,
+  roomStatus,
+  turnSeconds: turnSecondsProp,
+  totalCards: totalCardsProp,
+  capacity: capacityProp,
+  minPlayers,
+  onSettingsChange,
+  onShare,
 }: RoomSettingsProps) {
-  const [turnSeconds, setTurnSeconds] = useState(30)
-  const [players, setPlayers] = useState<2 | 3 | 4>(2)
-  const [totalCards, setTotalCards] = useState(26)
+  const [turnSeconds, setTurnSeconds] = useState(turnSecondsProp)
+  const [players, setPlayers] = useState<2 | 3 | 4>(capacityProp as 2 | 3 | 4)
+  const [totalCards, setTotalCards] = useState(totalCardsProp)
+
+  const isWaiting = roomStatus === 'waiting'
+  const disabled = !canEdit || !isWaiting
+
+  useEffect(() => {
+    setTurnSeconds(turnSecondsProp)
+  }, [turnSecondsProp])
+
+  useEffect(() => {
+    setPlayers(capacityProp as 2 | 3 | 4)
+  }, [capacityProp])
+
+  useEffect(() => {
+    setTotalCards(totalCardsProp)
+  }, [totalCardsProp])
+
+  const playerOptions = useMemo(
+    () => PLAYER_OPTIONS.filter((p) => p >= minPlayers),
+    [minPlayers],
+  )
 
   const validTotalCardOptions = useMemo(
     () => TOTAL_CARD_OPTIONS.filter((n) => n >= players * 13),
     [players],
   )
+
+  const pushUpdate = (next: { turnSeconds: number; capacity: number; totalCards: number }) => {
+    if (disabled) return
+    onSettingsChange(next)
+  }
+
+  const handleTurnChange = (e: SelectChangeEvent<number>) => {
+    const v = Number(e.target.value) as (typeof TURN_TIME_OPTIONS)[number]
+    setTurnSeconds(v)
+    pushUpdate({ turnSeconds: v, capacity: players, totalCards })
+  }
+
+  const handlePlayersChange = (e: SelectChangeEvent<number>) => {
+    const nextP = Number(e.target.value) as 2 | 3 | 4
+    setPlayers(nextP)
+    const minCards = nextP * 13
+    let nextCards = totalCards
+    if (totalCards < minCards) {
+      nextCards = minCards
+      setTotalCards(nextCards)
+    }
+    pushUpdate({ turnSeconds, capacity: nextP, totalCards: nextCards })
+  }
+
+  const handleTotalCardsChange = (e: SelectChangeEvent<number>) => {
+    const v = Number(e.target.value)
+    setTotalCards(v)
+    pushUpdate({ turnSeconds, capacity: players, totalCards: v })
+  }
 
   return (
     <Box
@@ -40,26 +99,19 @@ export function RoomSettings({
         border: '1px solid rgba(255, 255, 255, 0.22)',
       }}
     >
-      <Stack
-        direction="row"
-        spacing={1.25}
-        sx={{ alignItems: 'center', alignSelf: 'flex-start' }}
-      >
-        <Avatar src={selectedImage} alt="Selected character" sx={{ width: 44, height: 44 }} />
-        <Box>
-          <Typography sx={{ color: '#f8fafc', fontWeight: 700, lineHeight: 1.2 }}>
-            {name.trim() || 'Player'}
-          </Typography>
-          <Typography sx={{ color: 'rgba(248, 250, 252, 0.78)', fontSize: '0.85rem' }}>
-            Character {Math.min(selectedIndex + 1, Math.max(1, totalCharacters))}/
-            {Math.max(1, totalCharacters)}
-          </Typography>
-        </Box>
-      </Stack>
-
       <Typography variant="h6" sx={{ color: '#f8fafc', m: 0 }}>
         Room Settings
       </Typography>
+
+      {!isWaiting ? (
+        <Typography sx={{ color: 'rgba(252, 211, 77, 0.95)', fontSize: '0.9rem' }}>
+          Settings are locked while the game is in progress.
+        </Typography>
+      ) : !canEdit ? (
+        <Typography sx={{ color: 'rgba(203, 213, 225, 0.95)', fontSize: '0.9rem' }}>
+          Only the host can change these settings.
+        </Typography>
+      ) : null}
 
       <FormControl size="small" fullWidth>
         <InputLabel id="turn-time-label">Turn Time (seconds)</InputLabel>
@@ -67,7 +119,8 @@ export function RoomSettings({
           labelId="turn-time-label"
           value={turnSeconds}
           label="Turn Time (seconds)"
-          onChange={(e) => setTurnSeconds(Number(e.target.value))}
+          disabled={disabled}
+          onChange={handleTurnChange}
         >
           {TURN_TIME_OPTIONS.map((s) => (
             <MenuItem key={s} value={s}>
@@ -83,14 +136,10 @@ export function RoomSettings({
           labelId="total-players-label"
           value={players}
           label="Total Players"
-          onChange={(e) => {
-            const next = Number(e.target.value) as 2 | 3 | 4
-            setPlayers(next)
-            const minCards = next * 13
-            if (totalCards < minCards) setTotalCards(minCards)
-          }}
+          disabled={disabled}
+          onChange={handlePlayersChange}
         >
-          {PLAYER_OPTIONS.map((p) => (
+          {playerOptions.map((p) => (
             <MenuItem key={p} value={p}>
               {p}
             </MenuItem>
@@ -104,7 +153,8 @@ export function RoomSettings({
           labelId="total-cards-label"
           value={totalCards}
           label="Total Cards"
-          onChange={(e) => setTotalCards(Number(e.target.value))}
+          disabled={disabled}
+          onChange={handleTotalCardsChange}
         >
           {validTotalCardOptions.map((c) => (
             <MenuItem key={c} value={c}>
@@ -115,10 +165,12 @@ export function RoomSettings({
       </FormControl>
 
       <Stack direction="row" spacing={1.5} sx={{ justifyContent: 'flex-end' }}>
-        <Button variant="outlined" color="inherit">
+        <Button variant="outlined" color="inherit" onClick={onShare}>
           Share
         </Button>
-        <Button variant="contained">Start</Button>
+        <Button variant="contained" disabled={!canEdit || !isWaiting}>
+          Start
+        </Button>
       </Stack>
     </Box>
   )

@@ -1,29 +1,27 @@
-import type { ComponentType } from 'react'
-
-type LobbyUser = {
+export type RoomUser = {
   socketId: string
   name: string
   characterIndex: number
 }
 
-type LobbyRoomState = {
+export type RoomState = {
   id: string
   hostSocketId: string
   capacity: number
   status: string
   turnSeconds: number
   totalCards: number
-  users: LobbyUser[]
+  users: RoomUser[]
 }
 
-type LobbyMessage = {
+export type RoomMessage = {
   socketId: string
   name: string
   message: string
   sentAt: number
 }
 
-export const Lobby: ComponentType<{
-  room: LobbyRoomState
-  lastMessage: LobbyMessage | null
-}>
+export type RoomSession = {
+  room: RoomState
+  name: string
+}
