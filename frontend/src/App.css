@@ -331,6 +331,13 @@
   min-width: 130px;
 }
 
+.game-fixed-value {
+  min-width: 130px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .hand-list {
   display: flex;
   flex-wrap: wrap;

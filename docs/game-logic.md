@@ -188,6 +188,14 @@ Until one of those resolution events occurs:
 - they are still considered active in round context
 - they cannot bypass challenge responsibility for that unresolved pile
 
+Pass-loop edge case:
+
+- if pass loop completes and turn returns to `lastBetPlayer`
+- and `lastBetPlayer` has `0` cards
+- then they auto-pass
+- flush resolves the round immediately
+- and that player is marked finished and ranked at once
+
 After resolution:
 
 - if that player's hand is still `0`, then mark them finished

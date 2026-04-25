@@ -273,6 +273,9 @@ func (s *roomStore) passTurn(io *server.Server, socketID string, reason string) 
 		"reason":   reason,
 	})
 	s.moveToNextActiveLocked(game)
+	if s.tryAutoResolveZeroCardLastBettorLocked(io, state, game) {
+		return "", ""
+	}
 	s.resetTurnDeadlineLocked(state, game)
 	s.emitTurnUpdateLocked(io, state, game)
 	return "", ""
@@ -381,6 +384,9 @@ func (s *roomStore) onTimerTick(io *server.Server, roomID string) {
 		"reason":   "timeout",
 	})
 	s.moveToNextActiveLocked(game)
+	if s.tryAutoResolveZeroCardLastBettorLocked(io, state, game) {
+		return
+	}
 	s.resetTurnDeadlineLocked(state, game)
 	s.emitTurnUpdateLocked(io, state, game)
 }
@@ -400,6 +406,32 @@ func (s *roomStore) flushRoundLocked(io *server.Server, state *RoomState, game *
 	}
 	s.resetTurnDeadlineLocked(state, game)
 	s.emitTurnUpdateLocked(io, state, game)
+}
+
+func (s *roomStore) tryAutoResolveZeroCardLastBettorLocked(io *server.Server, state *RoomState, game *GameState) bool {
+	if game.CurrentBet == nil || game.LastBetPlayerID == "" {
+		return false
+	}
+	currentPlayerID := game.currentPlayerID()
+	if currentPlayerID == "" || currentPlayerID != game.LastBetPlayerID {
+		return false
+	}
+	if len(game.Hands[currentPlayerID]) != 0 {
+		return false
+	}
+	requiredPasses := s.activePlayerCountLocked(game) - 1
+	if requiredPasses < 0 {
+		requiredPasses = 0
+	}
+	if game.PassCount < requiredPasses {
+		return false
+	}
+	io.To(server.Room(state.ID)).Emit("player_pass", map[string]any{
+		"playerId": currentPlayerID,
+		"reason":   "auto_no_cards",
+	})
+	s.flushRoundLocked(io, state, game, currentPlayerID)
+	return true
 }
 
 func (s *roomStore) resetRoundLocked(game *GameState, starterID string) {

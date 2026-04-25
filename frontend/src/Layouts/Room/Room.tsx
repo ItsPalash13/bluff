@@ -9,6 +9,7 @@ import {
   MenuItem,
   Paper,
   Select,
+  Chip,
   Typography,
   Checkbox,
 } from '@mui/material'
@@ -36,7 +37,6 @@ export function Room({ roomSession }: RoomProps) {
   const [turnUpdate, setTurnUpdate] = useState<TurnUpdatePayload | null>(null)
   const [gameStatus, setGameStatus] = useState(roomSession.room.status || 'waiting')
   const [selectedRank, setSelectedRank] = useState('Q')
-  const [selectedCount, setSelectedCount] = useState(1)
   const [selectedCardIds, setSelectedCardIds] = useState<string[]>([])
   const [gameEndSummary, setGameEndSummary] = useState<{ finishedPlayers: string[] } | null>(null)
   const match = useMatch('/:roomId')
@@ -54,7 +54,10 @@ export function Room({ roomSession }: RoomProps) {
   const isInRound = roomStatus === 'in_round'
   const isGameEnd = roomStatus === 'game_end'
 
-  const canSubmitBet = isInRound && isMyTurn && selectedCardIds.length > 0 && selectedCardIds.length <= 4
+  const selectedCount = selectedCardIds.length
+  const roundRank = turnUpdate?.currentBet?.rank ?? ''
+  const effectiveRank = roundRank || selectedRank
+  const canSubmitBet = isInRound && isMyTurn && selectedCount > 0 && selectedCount <= 4
   const canPass = isInRound && isMyTurn && hasCurrentBet
   const canCallBluff = useMemo(() => {
     if (!turnUpdate || !isInRound || !hasCurrentBet) return false
@@ -127,11 +130,6 @@ export function Room({ roomSession }: RoomProps) {
     }
   }, [socket, roomId, roomState.id])
 
-  useEffect(() => {
-    const safeCount = Math.min(4, Math.max(1, selectedCardIds.length || 1))
-    setSelectedCount(safeCount)
-  }, [selectedCardIds])
-
   const handleSettingsChange = (p: { turnSeconds: number; capacity: number; totalCards: number }) => {
     if (!socket) return
     socket.emit('room:updateSettings', p)
@@ -156,7 +154,7 @@ export function Room({ roomSession }: RoomProps) {
     if (!socket || !canSubmitBet) return
     socket.emit('game:play_bet', {
       cardIds: selectedCardIds,
-      rank: selectedRank,
+      rank: effectiveRank,
       count: selectedCount,
     })
     setSelectedCardIds([])
@@ -242,39 +240,42 @@ export function Room({ roomSession }: RoomProps) {
                 alignItems: { xs: 'stretch', md: 'center' },
               }}
             >
-              <FormControl size="small" className="game-control">
-                <InputLabel id="rank-label">Rank</InputLabel>
-                <Select
-                  labelId="rank-label"
-                  value={selectedRank}
-                  label="Rank"
-                  onChange={(event) => setSelectedRank(event.target.value)}
-                  disabled={!isMyTurn || !isInRound}
-                >
-                  {rankOptions.map((rank) => (
-                    <MenuItem key={rank} value={rank}>
-                      {rank}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+              {roundRank ? (
+                <Box className="game-fixed-value">
+                  <Typography variant="caption" sx={{ color: '#cbd5e1' }}>
+                    Round Rank
+                  </Typography>
+                  <Chip size="small" color="success" label={roundRank} />
+                </Box>
+              ) : (
+                <FormControl size="small" className="game-control">
+                  <InputLabel id="rank-label">Rank</InputLabel>
+                  <Select
+                    labelId="rank-label"
+                    value={selectedRank}
+                    label="Rank"
+                    onChange={(event) => setSelectedRank(event.target.value)}
+                    disabled={!isMyTurn || !isInRound}
+                  >
+                    {rankOptions.map((rank) => (
+                      <MenuItem key={rank} value={rank}>
+                        {rank}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              )}
 
-              <FormControl size="small" className="game-control">
-                <InputLabel id="count-label">Count</InputLabel>
-                <Select
-                  labelId="count-label"
-                  value={selectedCount}
-                  label="Count"
-                  onChange={(event) => setSelectedCount(Number(event.target.value))}
-                  disabled={!isMyTurn || !isInRound}
-                >
-                  {[1, 2, 3, 4].map((count) => (
-                    <MenuItem key={count} value={count}>
-                      {count}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+              <Box className="game-fixed-value">
+                <Typography variant="caption" sx={{ color: '#cbd5e1' }}>
+                  Selected Count
+                </Typography>
+                <Chip
+                  size="small"
+                  label={selectedCount || 0}
+                  color={selectedCount > 0 ? 'primary' : 'default'}
+                />
+              </Box>
 
               <Button variant="contained" onClick={handleSubmitBet} disabled={!canSubmitBet}>
                 Submit Bet
