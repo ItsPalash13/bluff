@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Box, Button } from '@mui/material'
+import { Box, IconButton } from '@mui/material'
 import ChatIcon from '@mui/icons-material/Chat'
 import { useMatch } from 'react-router-dom'
 import { Lobby } from './Lobby'
@@ -26,7 +26,6 @@ export function Room({ roomSession }: RoomProps) {
   const isHost = Boolean(socket && roomState.hostSocketId === socket.id)
   const roomStatus = roomState.status || 'waiting'
   const canEdit = isHost && roomStatus === 'waiting'
-  const minPlayers = Math.min(4, Math.max(2, roomState.users.length)) as 2 | 3 | 4
 
   useEffect(() => {
     if (!socket) {
@@ -59,6 +58,11 @@ export function Room({ roomSession }: RoomProps) {
     socket.emit('room:updateSettings', p)
   }
 
+  const handleStart = (p: { turnSeconds: number; totalCards: number }) => {
+    if (!socket) return
+    socket.emit('room:start', p)
+  }
+
   const handleCopyLink = async () => {
     try {
       await navigator.clipboard.writeText(shareUrl)
@@ -74,27 +78,28 @@ export function Room({ roomSession }: RoomProps) {
         lastMessage={lastMessage}
       />
 
-      <Box className="room-settings-anchor">
-        <RoomSettings
-          canEdit={canEdit}
-          roomStatus={roomStatus}
-          turnSeconds={roomState.turnSeconds ?? 30}
-          totalCards={roomState.totalCards ?? 26}
-          capacity={roomState.capacity ?? 2}
-          minPlayers={minPlayers}
-          onSettingsChange={handleSettingsChange}
-          onShare={handleCopyLink}
-        />
-      </Box>
+      {roomStatus === 'waiting' ? (
+        <Box className="room-settings-anchor">
+          <RoomSettings
+            canEdit={canEdit}
+            roomStatus={roomStatus}
+            turnSeconds={roomState.turnSeconds ?? 30}
+            totalCards={roomState.totalCards ?? 26}
+            capacity={roomState.capacity ?? 2}
+            onSettingsChange={handleSettingsChange}
+            onStart={handleStart}
+            onShare={handleCopyLink}
+          />
+        </Box>
+      ) : null}
 
-      <Button
+      <IconButton
         className="room-comment-fab"
-        variant="contained"
-        startIcon={<ChatIcon />}
+        aria-label="Comments"
         onClick={() => dispatch(setCommentOpen(!commentOpen))}
       >
-        Comments
-      </Button>
+        <ChatIcon />
+      </IconButton>
     </Box>
   )
 }

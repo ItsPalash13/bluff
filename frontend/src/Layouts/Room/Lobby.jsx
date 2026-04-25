@@ -27,33 +27,16 @@ export function Lobby({ room, lastMessage }) {
     return () => clearTimeout(timeout)
   }, [lastMessage])
 
-  const getSeatStyle = (index, total) => {
-    const safeTotal = Math.max(1, total)
-    const t = safeTotal === 1 ? 0.5 : index / (safeTotal - 1)
-    const start = -70
-    const end = 70
-    const angleDeg = start + (end - start) * t
-    const radians = (angleDeg * Math.PI) / 180
-    const radiusX = 38
-    const radiusY = 28
-    const left = 50 + radiusX * Math.sin(radians)
-    const top = 40 - radiusY * Math.cos(radians)
-    return {
-      left: `${left}%`,
-      top: `${top}%`,
-    }
-  }
-
   return (
     <Box className="lobby-layout">
-      <Box className="lobby-arc">
-        {room.users.map((user, index) => {
+      <Box className="lobby-top">
+        {room.users.map((user) => {
           const avatarUrl = getCharacterImageUrlByIndex(themeId, Math.min(user.characterIndex, totalCharacters - 1))
           const isHost = user.socketId === room.hostSocketId
           return (
-            <Box key={user.socketId} className="lobby-seat" sx={getSeatStyle(index, room.users.length)}>
+            <Box key={user.socketId} className="lobby-seat">
               <Box sx={{ position: 'relative' }}>
-                <Avatar src={avatarUrl} alt={user.name} sx={{ width: 72, height: 72, border: '2px solid #cbd5e1' }} />
+                <Avatar src={avatarUrl} alt={user.name} sx={{ width: 64, height: 64, border: '2px solid #cbd5e1' }} />
                 {isHost ? (
                   <Box className="lobby-seat__host-crown">
                     <img src={crownImg} alt="" className="lobby-seat__host-crown-img" />

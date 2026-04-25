@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Box, Button, FormControl, InputLabel, MenuItem, Select, Stack, Typography } from '@mui/material'
 import type { SelectChangeEvent } from '@mui/material/Select'
 
@@ -7,16 +7,18 @@ type RoomSettingsProps = {
   roomStatus: string
   turnSeconds: number
   totalCards: number
-  /** Max players in room; must be ≥ minPlayers. */
   capacity: number
-  minPlayers: 2 | 3 | 4
   onSettingsChange: (p: { turnSeconds: number; capacity: number; totalCards: number }) => void
+  onStart: (p: { turnSeconds: number; totalCards: number }) => void
   onShare: () => void
 }
 
 const TURN_TIME_OPTIONS = [15, 20, 30, 45, 60] as const
-const PLAYER_OPTIONS = [2, 3, 4] as const
-const TOTAL_CARD_OPTIONS = [26, 39, 52] as const
+const TOTAL_CARD_OPTIONS = [
+  { value: 26, label: '1/2 deck' },
+  { value: 39, label: '3/4 deck' },
+  { value: 52, label: 'Full deck' },
+] as const
 
 export function RoomSettings({
   canEdit,
@@ -24,12 +26,11 @@ export function RoomSettings({
   turnSeconds: turnSecondsProp,
   totalCards: totalCardsProp,
   capacity: capacityProp,
-  minPlayers,
   onSettingsChange,
+  onStart,
   onShare,
 }: RoomSettingsProps) {
   const [turnSeconds, setTurnSeconds] = useState(turnSecondsProp)
-  const [players, setPlayers] = useState<2 | 3 | 4>(capacityProp as 2 | 3 | 4)
   const [totalCards, setTotalCards] = useState(totalCardsProp)
 
   const isWaiting = roomStatus === 'waiting'
@@ -40,22 +41,8 @@ export function RoomSettings({
   }, [turnSecondsProp])
 
   useEffect(() => {
-    setPlayers(capacityProp as 2 | 3 | 4)
-  }, [capacityProp])
-
-  useEffect(() => {
     setTotalCards(totalCardsProp)
   }, [totalCardsProp])
-
-  const playerOptions = useMemo(
-    () => PLAYER_OPTIONS.filter((p) => p >= minPlayers),
-    [minPlayers],
-  )
-
-  const validTotalCardOptions = useMemo(
-    () => TOTAL_CARD_OPTIONS.filter((n) => n >= players * 13),
-    [players],
-  )
 
   const pushUpdate = (next: { turnSeconds: number; capacity: number; totalCards: number }) => {
     if (disabled) return
@@ -65,25 +52,13 @@ export function RoomSettings({
   const handleTurnChange = (e: SelectChangeEvent<number>) => {
     const v = Number(e.target.value) as (typeof TURN_TIME_OPTIONS)[number]
     setTurnSeconds(v)
-    pushUpdate({ turnSeconds: v, capacity: players, totalCards })
-  }
-
-  const handlePlayersChange = (e: SelectChangeEvent<number>) => {
-    const nextP = Number(e.target.value) as 2 | 3 | 4
-    setPlayers(nextP)
-    const minCards = nextP * 13
-    let nextCards = totalCards
-    if (totalCards < minCards) {
-      nextCards = minCards
-      setTotalCards(nextCards)
-    }
-    pushUpdate({ turnSeconds, capacity: nextP, totalCards: nextCards })
+    pushUpdate({ turnSeconds: v, capacity: capacityProp, totalCards })
   }
 
   const handleTotalCardsChange = (e: SelectChangeEvent<number>) => {
     const v = Number(e.target.value)
     setTotalCards(v)
-    pushUpdate({ turnSeconds, capacity: players, totalCards: v })
+    pushUpdate({ turnSeconds, capacity: capacityProp, totalCards: v })
   }
 
   return (
@@ -131,23 +106,6 @@ export function RoomSettings({
       </FormControl>
 
       <FormControl size="small" fullWidth>
-        <InputLabel id="total-players-label">Total Players</InputLabel>
-        <Select
-          labelId="total-players-label"
-          value={players}
-          label="Total Players"
-          disabled={disabled}
-          onChange={handlePlayersChange}
-        >
-          {playerOptions.map((p) => (
-            <MenuItem key={p} value={p}>
-              {p}
-            </MenuItem>
-          ))}
-        </Select>
-      </FormControl>
-
-      <FormControl size="small" fullWidth>
         <InputLabel id="total-cards-label">Total Cards</InputLabel>
         <Select
           labelId="total-cards-label"
@@ -156,9 +114,9 @@ export function RoomSettings({
           disabled={disabled}
           onChange={handleTotalCardsChange}
         >
-          {validTotalCardOptions.map((c) => (
-            <MenuItem key={c} value={c}>
-              {c}
+          {TOTAL_CARD_OPTIONS.map((option) => (
+            <MenuItem key={option.value} value={option.value}>
+              {option.label}
             </MenuItem>
           ))}
         </Select>
@@ -168,7 +126,11 @@ export function RoomSettings({
         <Button variant="outlined" color="inherit" onClick={onShare}>
           Share
         </Button>
-        <Button variant="contained" disabled={!canEdit || !isWaiting}>
+        <Button
+          variant="contained"
+          disabled={!canEdit || !isWaiting}
+          onClick={() => onStart({ turnSeconds, totalCards })}
+        >
           Start
         </Button>
       </Stack>
