@@ -346,9 +346,27 @@
   outline-offset: 2px;
 }
 
-.char-strip {
-  width: min(520px, 100%);
-  justify-content: center;
+.char-select {
+  width: 100%;
+  max-width: min(420px, 100%);
+  align-self: center;
+}
+
+.char-select__grid {
+  max-height: min(240px, 42svh);
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(68px, 1fr));
+  justify-items: center;
+  gap: 10px;
+  padding: 8px 6px 10px;
+  box-sizing: border-box;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable;
 }
 
 .char-card {
@@ -1221,8 +1239,10 @@
     height: 58px;
   }
 
-  .char-strip__meta {
-    display: none;
+  .char-select__grid {
+    max-height: min(200px, 36svh);
+    grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
+    gap: 8px;
   }
 
   .actions {
