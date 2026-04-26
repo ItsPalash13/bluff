@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Avatar, Box, Typography } from '@mui/material'
 import crownImg from '../../assets/crown.png'
 import { getCharacterImageUrlByIndex, getCharacterCount } from '../../assets/characters/characterImageSources'
@@ -17,6 +17,8 @@ export function Lobby({
   const totalCharacters = getCharacterCount(themeId)
   const [messageBubbles, setMessageBubbles] = useState({})
   const [actionBubbles, setActionBubbles] = useState({})
+  const chatBubbleTimersRef = useRef({})
+  const actionBubbleTimersRef = useRef({})
 
   const bubbleTimeoutMs = 1000
   const actionBubbleTimeoutMs = 1000
@@ -26,18 +28,23 @@ export function Lobby({
     if (!lastMessage?.socketId || !lastMessage.message) return
     const normalizedMessage = lastMessage.message.trim().slice(0, maxBubbleChars)
     if (!normalizedMessage) return
+    const { socketId } = lastMessage
     setMessageBubbles((prev) => ({
       ...prev,
-      [lastMessage.socketId]: normalizedMessage,
+      [socketId]: normalizedMessage,
     }))
-    const timeout = setTimeout(() => {
+    const prevTimer = chatBubbleTimersRef.current[socketId]
+    if (prevTimer) {
+      clearTimeout(prevTimer)
+    }
+    chatBubbleTimersRef.current[socketId] = setTimeout(() => {
       setMessageBubbles((prev) => {
         const next = { ...prev }
-        delete next[lastMessage.socketId]
+        delete next[socketId]
         return next
       })
+      delete chatBubbleTimersRef.current[socketId]
     }, bubbleTimeoutMs)
-    return () => clearTimeout(timeout)
   }, [lastMessage])
 
   useEffect(() => {
@@ -45,15 +52,26 @@ export function Lobby({
     const { socketId, text } = gameActionToast
     const normalized = String(text).trim().slice(0, maxBubbleChars) || '—'
     setActionBubbles((prev) => ({ ...prev, [socketId]: normalized }))
-    const timeout = setTimeout(() => {
+    const prevTimer = actionBubbleTimersRef.current[socketId]
+    if (prevTimer) {
+      clearTimeout(prevTimer)
+    }
+    actionBubbleTimersRef.current[socketId] = setTimeout(() => {
       setActionBubbles((prev) => {
         const next = { ...prev }
         delete next[socketId]
         return next
       })
+      delete actionBubbleTimersRef.current[socketId]
     }, actionBubbleTimeoutMs)
-    return () => clearTimeout(timeout)
   }, [gameActionToast])
+
+  useEffect(() => {
+    return () => {
+      Object.values(chatBubbleTimersRef.current).forEach((timerId) => clearTimeout(timerId))
+      Object.values(actionBubbleTimersRef.current).forEach((timerId) => clearTimeout(timerId))
+    }
+  }, [])
 
   return (
     <Box className="lobby-layout">
