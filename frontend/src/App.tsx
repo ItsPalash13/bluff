@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Route, Routes, useMatch, useNavigate } from 'react-router-dom'
+import { Link, Route, Routes, useMatch, useNavigate } from 'react-router-dom'
 import { CreateNJoin } from './Layouts/CreateNJoin/CreateNJoin'
 import { Room } from './Layouts/Room/Room'
 import { SocketProvider, useAppSocket } from './state/SocketProvider'
@@ -7,6 +7,8 @@ import { CommentBox } from './Layouts/Room/CommentBox'
 import { useAppDispatch, useAppSelector } from './store/hooks'
 import { setCommentOpen } from './store/uiSlice'
 import type { RoomSession, RoomState } from './Layouts/roomTypes'
+import './App.css'
+import logo from './assets/logo.png'
 
 export default function App() {
   return (
@@ -25,10 +27,6 @@ function AppShell() {
   const roomMatch = useMatch('/:roomId')
   const roomId = roomMatch?.params.roomId
   const previousRoomIdRef = useRef<string | undefined>(undefined)
-
-  useEffect(() => {
-    ensureConnected()
-  }, [ensureConnected])
 
   const handleJoined = useCallback(
     (room: RoomState, name: string) => {
@@ -61,20 +59,12 @@ function AppShell() {
 
   const shouldShowCommentBox = commentOpen && isConnected
 
-  if (!isConnected) {
-    return <CreateNJoin connecting onJoined={handleJoined} />
-  }
-
-  if (!roomSession) {
-    return (
-      <Routes>
-        <Route path="/" element={<CreateNJoin connecting={false} onJoined={handleJoined} />} />
-        <Route path="/:roomId" element={<CreateNJoin connecting={false} onJoined={handleJoined} />} />
-      </Routes>
-    )
-  }
-
-  return (
+  const content = !roomSession ? (
+    <Routes>
+      <Route path="/" element={<CreateNJoin connecting={false} onJoined={handleJoined} />} />
+      <Route path="/:roomId" element={<CreateNJoin connecting={false} onJoined={handleJoined} />} />
+    </Routes>
+  ) : (
     <>
       <Room roomSession={roomSession} />
       <CommentBox
@@ -82,6 +72,17 @@ function AppShell() {
         onClose={() => dispatch(setCommentOpen(false))}
         onSend={handleCommentSend}
       />
+    </>
+  )
+
+  return (
+    <>
+      <div className="app-logo-tab-wrap">
+        <Link to="/" className="app-logo-tab" aria-label="Go to home">
+          <img src={logo} alt="" className="app-logo-tab__img" />
+        </Link>
+      </div>
+      {content}
     </>
   )
 }

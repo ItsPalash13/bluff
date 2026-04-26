@@ -213,7 +213,7 @@ export function Room({ roomSession }: RoomProps) {
           <RoomSettings
             canEdit={canEdit}
             roomStatus={roomStatus}
-            turnSeconds={roomState.turnSeconds ?? 30}
+            turnSeconds={roomState.turnSeconds ?? 0}
             totalCards={roomState.totalCards ?? 26}
             capacity={roomState.capacity ?? 2}
             onSettingsChange={handleSettingsChange}
@@ -235,7 +235,12 @@ export function Room({ roomSession }: RoomProps) {
             {turnUpdate ? (
               <>
                 <Typography>Current Turn: {turnUpdate.currentPlayerId || '-'}</Typography>
-                <Typography>Timer: {Math.max(0, turnUpdate.secondsLeft ?? 0)}s</Typography>
+                <Typography>
+                  Timer:{' '}
+                  {roomState.turnSeconds <= 0 || (turnUpdate.secondsLeft ?? 0) < 0
+                    ? 'Off'
+                    : `${Math.max(0, turnUpdate.secondsLeft ?? 0)}s`}
+                </Typography>
                 {turnUpdate.currentBet ? (
                   <Typography>
                     Current Bet: {turnUpdate.currentBet.count} x {turnUpdate.currentBet.rank} by {turnUpdate.currentBet.playerId}

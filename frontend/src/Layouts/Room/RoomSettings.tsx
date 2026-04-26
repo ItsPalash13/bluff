@@ -13,7 +13,7 @@ type RoomSettingsProps = {
   onShare: () => void
 }
 
-const TURN_TIME_OPTIONS = [15, 20, 30, 45, 60] as const
+const TURN_TIME_OPTIONS = [0, 15, 20, 30, 45, 60] as const
 const TOTAL_CARD_OPTIONS = [
   { value: 26, label: '1/2 deck' },
   { value: 39, label: '3/4 deck' },
@@ -50,7 +50,7 @@ export function RoomSettings({
   }
 
   const handleTurnChange = (e: SelectChangeEvent<number>) => {
-    const v = Number(e.target.value) as (typeof TURN_TIME_OPTIONS)[number]
+    const v = Number(e.target.value)
     setTurnSeconds(v)
     pushUpdate({ turnSeconds: v, capacity: capacityProp, totalCards })
   }
@@ -89,17 +89,17 @@ export function RoomSettings({
       ) : null}
 
       <FormControl size="small" fullWidth>
-        <InputLabel id="turn-time-label">Turn Time (seconds)</InputLabel>
+        <InputLabel id="turn-time-label">Turn time</InputLabel>
         <Select
           labelId="turn-time-label"
           value={turnSeconds}
-          label="Turn Time (seconds)"
+          label="Turn time"
           disabled={disabled}
           onChange={handleTurnChange}
         >
           {TURN_TIME_OPTIONS.map((s) => (
             <MenuItem key={s} value={s}>
-              {s}s
+              {s === 0 ? 'No timer' : `${s}s`}
             </MenuItem>
           ))}
         </Select>

@@ -364,7 +364,7 @@ func intFromJSON(v any) int {
 
 func isAllowedTurnSeconds(n int) bool {
 	switch n {
-	case 15, 20, 30, 45, 60:
+	case 0, 15, 20, 30, 45, 60:
 		return true
 	default:
 		return false
@@ -389,7 +389,7 @@ func (s *roomStore) createRoom(socketID, name string, characterIndex int) *RoomS
 		HostSocketID: socketID,
 		Capacity:     defaultRoomCapacity,
 		Status:       roomStatusWaiting,
-		TurnSeconds:  30,
+		TurnSeconds:  0,
 		TotalCards:   26,
 		Users: []RoomUser{
 			{

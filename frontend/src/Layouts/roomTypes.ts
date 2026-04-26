@@ -42,6 +42,7 @@ export type TurnUpdatePayload = {
   roomId: string
   status: string
   currentPlayerId: string
+  /** -1 when room has no per-turn timer (turnSeconds === 0). */
   secondsLeft: number
   currentBet: GameBet | null
   pileCount: number

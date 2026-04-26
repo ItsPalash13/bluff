@@ -63,37 +63,29 @@
   text-align: center;
 }
 
-.lobby-seat__turn-timer {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
+.lobby-seat__turn-progress-row {
+  display: block;
   margin-top: 2px;
-  padding: 4px 10px;
+  width: 100%;
+}
+
+.lobby-seat__turn-progress {
+  width: 72px;
+  height: 8px;
+  margin: 0 auto;
   border-radius: 999px;
-  background: rgba(15, 23, 42, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  background: rgba(255, 255, 255, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  overflow: hidden;
 }
 
-.lobby-seat__turn-timer-icon {
-  color: #f8fafc !important;
-  font-size: 1rem !important;
-}
-
-.lobby-seat__turn-timer-seconds {
-  color: #f8fafc !important;
-  font-size: 0.95rem !important;
-  font-weight: 800 !important;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-}
-
-.lobby-seat__turn-timer-unit {
-  color: rgba(248, 250, 252, 0.85) !important;
-  font-size: 0.8rem !important;
-  font-weight: 700 !important;
-  line-height: 1;
+.lobby-seat__turn-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  transition:
+    width 0.9s linear,
+    background-color 0.6s ease,
+    box-shadow 0.6s ease;
 }
 
 .lobby-seat__message {
@@ -137,12 +129,14 @@
 
 .lobby-seat__host-crown {
   position: absolute;
-  top: -10px;
-  right: -6px;
+  top: -14px;
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
   align-items: center;
   justify-content: center;
   filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.45));
+  z-index: 2;
 }
 
 .lobby-seat__host-crown-img {
@@ -481,4 +475,29 @@
   .game-shell {
     padding: 12px;
   }
+}
+
+/* App shell: home logo as a top "tab" */
+.app-logo-tab-wrap {
+  position: fixed;
+  top: 0;
+  left: 16px;
+  z-index: 1300;
+}
+
+.app-logo-tab {
+  display: inline-flex;
+  align-items: flex-end;
+  padding: 6px 12px 0;
+  border-bottom: none;
+  border-radius: 14px 14px 0 0;
+  line-height: 0;
+  text-decoration: none;
+  color: inherit;
+}
+
+.app-logo-tab__img {
+  display: block;
+  height: 100px;
+  width: auto;
 }

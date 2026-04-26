@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { Avatar, Box, Typography } from '@mui/material'
-import AccessTimeIcon from '@mui/icons-material/AccessTime'
 import crownImg from '../../assets/crown.png'
 import { getCharacterImageUrlByIndex, getCharacterCount } from '../../assets/characters/characterImageSources'
 import { theme1 } from '../../theme/theme1'
@@ -39,6 +38,20 @@ export function Lobby({ room, lastMessage, currentTurnPlayerId, turnSecondsLeft,
           const isHost = user.socketId === room.hostSocketId
           const isCurrentTurn = Boolean(!gameEnded && currentTurnPlayerId && user.socketId === currentTurnPlayerId)
           const bubbleMessage = messageBubbles[user.socketId]
+          const hasTurnTimer = (room.turnSeconds ?? 0) > 0
+          const totalTurnSeconds = Math.max(1, room.turnSeconds || 1)
+          const currentSeconds =
+            hasTurnTimer && typeof turnSecondsLeft === 'number' && turnSecondsLeft >= 0
+              ? Math.max(0, turnSecondsLeft)
+              : hasTurnTimer
+                ? totalTurnSeconds
+                : 0
+          const timeRemainingRatio = hasTurnTimer
+            ? Math.max(0, Math.min(1, currentSeconds / totalTurnSeconds))
+            : 0
+          const turnProgressPercent = timeRemainingRatio * 100
+          // Full time: yellow (hue 48). Near zero: red (hue 0).
+          const turnFillColor = `hsl(${48 * timeRemainingRatio}deg 92% 50%)`
           return (
             <Box key={user.socketId} className="lobby-seat">
               <Box sx={{ position: 'relative' }}>
@@ -64,23 +77,18 @@ export function Lobby({ room, lastMessage, currentTurnPlayerId, turnSecondsLeft,
                 ) : null}
               </Box>
               <Typography className="lobby-seat__name">{user.name}</Typography>
-              {isCurrentTurn ? (
-                <Box className="lobby-seat__turn-timer" aria-label="Turn time remaining">
-                  <AccessTimeIcon className="lobby-seat__turn-timer-icon" fontSize="small" />
-                  {typeof turnSecondsLeft === 'number' ? (
-                    <>
-                      <Typography className="lobby-seat__turn-timer-seconds" component="span">
-                        {Math.max(0, turnSecondsLeft)}
-                      </Typography>
-                      <Typography className="lobby-seat__turn-timer-unit" component="span">
-                        s
-                      </Typography>
-                    </>
-                  ) : (
-                    <Typography className="lobby-seat__turn-timer-seconds" component="span">
-                      —
-                    </Typography>
-                  )}
+              {isCurrentTurn && hasTurnTimer ? (
+                <Box className="lobby-seat__turn-progress-row" aria-label="Turn progress">
+                  <Box className="lobby-seat__turn-progress">
+                    <Box
+                      className="lobby-seat__turn-progress-fill"
+                      sx={{
+                        width: `${turnProgressPercent}%`,
+                        backgroundColor: turnFillColor,
+                        boxShadow: `0 0 8px hsla(${48 * timeRemainingRatio}deg 90% 45% / 0.45)`,
+                      }}
+                    />
+                  </Box>
                 </Box>
               ) : null}
             </Box>

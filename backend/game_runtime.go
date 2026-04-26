@@ -96,6 +96,26 @@ func stringFromJSON(v any) string {
 	return ""
 }
 
+// turnDeadlineAfterNow sets the turn end time. If turnSeconds <= 0, there is no per-turn timeout;
+// the deadline is far in the future so timeout logic in onTimerTick never fires.
+func turnDeadlineAfterNow(turnSeconds int) time.Time {
+	if turnSeconds <= 0 {
+		return time.Now().Add(100 * 365 * 24 * time.Hour)
+	}
+	return time.Now().Add(time.Duration(turnSeconds) * time.Second)
+}
+
+func (s *roomStore) secondsLeftForClient(state *RoomState, game *GameState) int {
+	if state.TurnSeconds <= 0 {
+		return -1
+	}
+	sec := int(time.Until(game.CurrentTurnEndsAt).Seconds())
+	if sec < 0 {
+		return 0
+	}
+	return sec
+}
+
 func (s *roomStore) startGame(io *server.Server, socketID string, p roomStartPayload) (*RoomState, string, string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -192,7 +212,7 @@ func (s *roomStore) initializeGameLocked(state *RoomState) *GameState {
 		PassCount:         0,
 		FinishedPlayers:   []string{},
 		PlayerNames:       playerNames,
-		CurrentTurnEndsAt: time.Now().Add(time.Duration(state.TurnSeconds) * time.Second),
+		CurrentTurnEndsAt: turnDeadlineAfterNow(state.TurnSeconds),
 	}
 }
 
@@ -368,6 +388,9 @@ func (s *roomStore) onTimerTick(io *server.Server, roomID string) {
 	if !ok || state.Status != roomStatusInRound || game.Status != roomStatusInRound {
 		return
 	}
+	if state.TurnSeconds <= 0 {
+		return
+	}
 
 	secondsLeft := int(time.Until(game.CurrentTurnEndsAt).Seconds())
 	if secondsLeft < 0 {
@@ -376,8 +399,8 @@ func (s *roomStore) onTimerTick(io *server.Server, roomID string) {
 
 	currentPlayerID := game.currentPlayerID()
 	io.To(server.Room(roomID)).Emit("timer_tick", map[string]any{
-		"playerId":    currentPlayerID,
-		"secondsLeft": secondsLeft,
+		"playerId":      currentPlayerID,
+		"secondsLeft":   secondsLeft,
 	})
 	if secondsLeft > 0 {
 		return
@@ -481,7 +504,7 @@ func (s *roomStore) emitTurnUpdateLocked(io *server.Server, state *RoomState, ga
 		"roomId":            state.ID,
 		"status":            game.Status,
 		"currentPlayerId":   game.currentPlayerID(),
-		"secondsLeft":       int(time.Until(game.CurrentTurnEndsAt).Seconds()),
+		"secondsLeft":       s.secondsLeftForClient(state, game),
 		"currentBet":        game.CurrentBet,
 		"pileCount":         len(game.Pile),
 		"lastBetPlayerId":   game.LastBetPlayerID,
@@ -745,14 +768,17 @@ func (s *roomStore) isActiveForRoundLocked(game *GameState, playerID string) boo
 }
 
 func (s *roomStore) resetTurnDeadlineLocked(state *RoomState, game *GameState) {
-	game.CurrentTurnEndsAt = time.Now().Add(time.Duration(state.TurnSeconds) * time.Second)
+	game.CurrentTurnEndsAt = turnDeadlineAfterNow(state.TurnSeconds)
 }
 
 func (s *roomStore) startTimerLocked(io *server.Server, state *RoomState, game *GameState) {
 	s.stopTimerLocked(state.ID)
+	game.CurrentTurnEndsAt = turnDeadlineAfterNow(state.TurnSeconds)
+	if state.TurnSeconds <= 0 {
+		return
+	}
 	stopCh := make(chan struct{})
 	s.turnTimers[state.ID] = stopCh
-	game.CurrentTurnEndsAt = time.Now().Add(time.Duration(state.TurnSeconds) * time.Second)
 	go func(roomID string, stop <-chan struct{}) {
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
