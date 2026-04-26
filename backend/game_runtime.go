@@ -163,6 +163,37 @@ func (s *roomStore) startGame(io *server.Server, socketID string, p roomStartPay
 	return cloneRoomState(state), "", ""
 }
 
+// restartRoom resets a finished room back to the waiting lobby with the currently
+// connected users. Only the host may invoke it, and only while the room is in
+// game_end. Settings (capacity / turnSeconds / totalCards) and the user list are
+// preserved; the GameState is dropped and any active timer is stopped.
+func (s *roomStore) restartRoom(io *server.Server, socketID string) (string, string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	roomID, ok := s.socketToRoom[socketID]
+	if !ok {
+		return "ROOM_NOT_FOUND", "You are not in a room."
+	}
+	state, exists := s.rooms[roomID]
+	if !exists {
+		return "ROOM_NOT_FOUND", "Room does not exist."
+	}
+	if state.HostSocketID != socketID {
+		return "NOT_HOST", "Only the host can restart the room."
+	}
+	if state.Status != roomStatusGameEnd {
+		return "INVALID_ROOM_STATUS", "Game has not ended yet."
+	}
+
+	s.stopTimerLocked(roomID)
+	delete(s.games, roomID)
+	state.Status = roomStatusWaiting
+
+	io.To(server.Room(state.ID)).Emit("room:state", cloneRoomState(state))
+	return "", ""
+}
+
 func (s *roomStore) initializeGameLocked(state *RoomState) *GameState {
 	// Build full 52-card deck, shuffle, then take N (host totalCards) at random;
 	// do not take a fixed prefix in rank/suit order before shuffling.

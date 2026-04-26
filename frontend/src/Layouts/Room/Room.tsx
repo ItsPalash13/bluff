@@ -388,6 +388,11 @@ export function Room({ roomSession }: RoomProps) {
     socket.emit('room:start', p)
   }
 
+  const handleRestart = () => {
+    if (!socket || !isHost || roomStatus !== 'game_end') return
+    socket.emit('room:restart')
+  }
+
   const handleToggleCard = (cardId: string) => {
     setSelectedCardIds((prev) => {
       if (prev.includes(cardId)) {
@@ -455,6 +460,20 @@ export function Room({ roomSession }: RoomProps) {
     return () => window.clearTimeout(timer)
   }, [openCallReveal])
 
+  // When the room flips back to `waiting` (e.g. host pressed Play Again), wipe
+  // any stale game-side state so the lobby is pristine for the next round.
+  useEffect(() => {
+    if (roomStatus !== 'waiting') return
+    setTurnUpdate(null)
+    setGameEndSummary(null)
+    setOpenCallReveal(null)
+    setPileFlushExit(null)
+    setSelectedCardIds([])
+    setGameActionToast(null)
+    setRankModalOpen(false)
+    lastKnownPileCountRef.current = 0
+  }, [roomStatus])
+
   const hand = turnUpdate?.yourHand ?? []
 
   return (
@@ -482,12 +501,30 @@ export function Room({ roomSession }: RoomProps) {
           />
         </Box>
       ) : isGameEnd ? (
-        <RankingBoard
-          ranking={gameEndSummary?.finishedPlayers ?? []}
-          nameBySocketId={nameBySocketId}
-          playerNamesFromGame={gameEndSummary?.playerNames}
-          users={roomState.users}
-        />
+        <>
+          <RankingBoard
+            ranking={gameEndSummary?.finishedPlayers ?? []}
+            nameBySocketId={nameBySocketId}
+            playerNamesFromGame={gameEndSummary?.playerNames}
+            users={roomState.users}
+          />
+          <Box className="game-end-restart">
+            {isHost ? (
+              <Button
+                className="game-end-restart__btn"
+                variant="contained"
+                color="success"
+                onClick={handleRestart}
+              >
+                Play Again!
+              </Button>
+            ) : (
+              <Typography className="game-end-restart__waiting" component="p">
+                Waiting for host to restart…
+              </Typography>
+            )}
+          </Box>
+        </>
       ) : (
         <>
         <Paper

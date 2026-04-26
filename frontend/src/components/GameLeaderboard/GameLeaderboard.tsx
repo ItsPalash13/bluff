@@ -50,7 +50,7 @@ function resolveAvatarUrl(users: GameLeaderboardUser[] | undefined, socketId: st
   const n = getCharacterCount(themeId)
   if (n <= 0) return ''
   const idx = Math.min(Math.max(0, u.characterIndex), n - 1)
-  return getCharacterImageUrlByIndex(themeId, idx)
+  return getCharacterImageUrlByIndex(themeId, idx) ?? ''
 }
 
 export function GameLeaderboard({

@@ -217,6 +217,17 @@ func newSocketServer() *server.Server {
 			}
 		})
 
+		socket.On("room:restart", func(args ...any) {
+			fmt.Printf("[socket] room:restart from=%s\n", socketID)
+			if errCode, errMsg := store.restartRoom(io, socketID); errCode != "" {
+				fmt.Printf("[socket] room:restart rejected socket=%s code=%s message=%q\n", socketID, errCode, errMsg)
+				socket.Emit("room:error", map[string]any{
+					"code":    errCode,
+					"message": errMsg,
+				})
+			}
+		})
+
 		socket.On("game:play_bet", func(args ...any) {
 			payload := parseGamePlayBetPayload(args)
 			if errCode, errMsg := store.playBet(io, socketID, payload); errCode != "" {

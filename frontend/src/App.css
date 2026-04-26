@@ -1237,3 +1237,23 @@
   height: 100px;
   width: auto;
 }
+
+/* Game-end "Play Again" panel rendered below the leaderboard */
+.game-end-restart {
+  display: flex;
+  justify-content: center;
+  margin: 4px auto 24px;
+}
+.game-end-restart__btn {
+  font-weight: 700 !important;
+  letter-spacing: 0.5px;
+  padding: 10px 28px !important;
+  border-radius: 999px !important;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.35) !important;
+}
+.game-end-restart__waiting {
+  margin: 0 !important;
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
