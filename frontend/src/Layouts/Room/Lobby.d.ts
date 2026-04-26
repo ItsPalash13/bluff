@@ -29,4 +29,5 @@ export const Lobby: ComponentType<{
   currentTurnPlayerId?: string
   turnSecondsLeft?: number
   gameEnded?: boolean
+  playerCardCounts?: Record<string, number>
 }>

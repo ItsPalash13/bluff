@@ -206,6 +206,7 @@ export function Room({ roomSession }: RoomProps) {
         currentTurnPlayerId={turnUpdate?.currentPlayerId ?? ''}
         turnSecondsLeft={turnUpdate?.secondsLeft}
         gameEnded={isGameEnd}
+        playerCardCounts={turnUpdate?.playerCardCounts}
       />
 
       {roomStatus === 'waiting' ? (

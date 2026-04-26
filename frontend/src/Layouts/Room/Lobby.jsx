@@ -4,7 +4,14 @@ import crownImg from '../../assets/crown.png'
 import { getCharacterImageUrlByIndex, getCharacterCount } from '../../assets/characters/characterImageSources'
 import { theme1 } from '../../theme/theme1'
 
-export function Lobby({ room, lastMessage, currentTurnPlayerId, turnSecondsLeft, gameEnded = false }) {
+export function Lobby({
+  room,
+  lastMessage,
+  currentTurnPlayerId,
+  turnSecondsLeft,
+  gameEnded = false,
+  playerCardCounts,
+}) {
   const themeId = theme1.pokerFelt.green.characterFolder
   const totalCharacters = getCharacterCount(themeId)
   const [messageBubbles, setMessageBubbles] = useState({})
@@ -74,6 +81,11 @@ export function Lobby({ room, lastMessage, currentTurnPlayerId, turnSecondsLeft,
                   <Box className="lobby-seat__host-crown">
                     <img src={crownImg} alt="" className="lobby-seat__host-crown-img" />
                   </Box>
+                ) : null}
+                {playerCardCounts && typeof playerCardCounts[user.socketId] === 'number' ? (
+                  <span className="lobby-seat__card-count" title="Cards in hand" aria-label={`${playerCardCounts[user.socketId]} cards`}>
+                    {playerCardCounts[user.socketId]}
+                  </span>
                 ) : null}
               </Box>
               <Typography className="lobby-seat__name">{user.name}</Typography>

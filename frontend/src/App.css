@@ -148,6 +148,37 @@
   user-select: none;
 }
 
+.lobby-seat__card-count {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  box-sizing: border-box;
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  min-height: 26px;
+  padding: 0;
+  display: grid;
+  place-content: center;
+  place-items: center;
+  text-align: center;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.72);
+  color: #f8fafc;
+  font-size: 0.65rem;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  border: 2px solid #22c55e;
+  box-shadow:
+    0 4px 10px rgba(0, 0, 0, 0.45),
+    0 2px 4px rgba(0, 0, 0, 0.3),
+    0 0 0 1px rgba(0, 0, 0, 0.15) inset;
+  pointer-events: none;
+  user-select: none;
+}
+
 .room-settings-anchor {
   width: min(460px, 100%);
   margin: 20px auto 0;
