@@ -148,6 +148,7 @@ On timeout:
 
 - Always move to next active player only.
 - `turnIndex = nextActivePlayer(turnIndex)`
+- Finished players are excluded from rotation; see §9.2.4.
 
 ## 9. Player Completion and Ranking
 
@@ -189,13 +190,51 @@ Until one of those resolution events occurs:
 - they are still considered active in round context
 - they cannot bypass challenge responsibility for that unresolved pile
 
-Pass-loop edge case:
+#### 9.2.1 Resolution after a bluff call (last bettor's hand is empty)
 
-- if pass loop completes and turn returns to `lastBetPlayer`
-- and `lastBetPlayer` has `0` cards
-- then they auto-pass
-- flush resolves the round immediately
-- and that player is marked finished and ranked at once
+If the last bettor played their final cards on the challenged bet, the bluff resolution
+ranks them immediately:
+
+- `bluffCaught == false` (bettor was truthful):
+  - caller takes the full pile (penalty), as in §5 Case 2
+  - empty-handed bettor is marked finished and appended to `finishedPlayers`
+  - **next round starts at the next eligible active player after the finished bettor**,
+    not at the bettor themselves (this overrides §5 Case 2's `turnIndex = lastBetPlayerId`
+    when that player is now finished)
+- `bluffCaught == true` (bettor lied):
+  - bettor takes the full pile and is no longer empty-handed; not finished
+  - caller starts the next round (unchanged from §5 Case 1)
+
+#### 9.2.2 Resolution after pass-loop on an empty-handed last bettor
+
+- pass loop completes and turn returns to `lastBetPlayer`
+- `lastBetPlayer` has `0` cards
+- they auto-pass; flush resolves the round immediately
+- bettor is marked finished and appended to `finishedPlayers`
+- next round starts at `nextActivePlayerAfter(firstBetPlayer)`, **skipping the
+  just-finished bettor**
+
+#### 9.2.3 Multi-finish in one round
+
+A single round may rank multiple players in sequence. Example:
+
+- P1 plays their last cards (becomes empty-handed `lastBetPlayer`)
+- P2 plays their last cards on top — P1's bet is now resolved, P1 is appended to
+  `finishedPlayers`; P2 becomes the new empty-handed `lastBetPlayer`
+- everyone else passes back to P2 → flush → P2 appended to `finishedPlayers`
+
+Every resolution event in the chain MUST append the eligible 0-card player(s) to
+`finishedPlayers` in resolution order **before** computing the next round's starter.
+
+#### 9.2.4 Next-starter skip invariant (authoritative)
+
+At the moment a `round_reset` is emitted (whether from bluff resolution, pass-loop
+flush, or disconnection-driven round restart):
+
+- the next starter MUST be a player with `Hands > 0`
+- players just appended to `finishedPlayers` MUST NOT be selected as starter
+- the next emitted `turn_update` MUST NOT carry a finished player as `currentPlayerId`
+- finished players MUST always be skipped by subsequent turn rotation
 
 After resolution:
 

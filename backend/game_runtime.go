@@ -366,10 +366,8 @@ func (s *roomStore) callBluff(io *server.Server, socketID string) (string, strin
 
 	lastBettorID := game.LastBetPlayerID
 	targetPlayerID := socketID
-	nextStarterID := lastBettorID
 	if bluffCaught {
 		targetPlayerID = lastBettorID
-		nextStarterID = socketID
 	}
 	// Snapshot reveal data before resetRoundLocked clears LastPlayedCards / CurrentBet.
 	revealCards := append([]Card(nil), game.LastPlayedCards...)
@@ -392,11 +390,26 @@ func (s *roomStore) callBluff(io *server.Server, socketID string) (string, strin
 		"claimedCount":         claimedCount,
 	})
 
-	s.resetRoundLocked(game, nextStarterID)
-	// Bluff resolution resolves the previous last bet.
-	s.recordIfFinishedLocked(game, lastBettorID)
-	s.recordIfFinishedLocked(game, socketID)
-	s.recordIfFinishedLocked(game, targetPlayerID)
+	// See docs/game-logic.md §9.2.1 + §9.2.4: clear round state first, sweep finished,
+	// THEN pick the next starter from handed players only. The §5 anchor (caller on
+	// bluff-true, last bettor on bluff-false) is preferred only if they still have
+	// cards; otherwise we walk forward via nextHandedAfterLocked so a just-finished
+	// player can never land on TurnIndex.
+	s.resetRoundLocked(game, "")
+	s.sweepFinishedLocked(game)
+
+	desiredAnchor := lastBettorID
+	if bluffCaught {
+		desiredAnchor = socketID
+	}
+	var nextStarter string
+	if len(game.Hands[desiredAnchor]) > 0 {
+		nextStarter = desiredAnchor
+	} else {
+		nextStarter = s.nextHandedAfterLocked(game, desiredAnchor)
+	}
+	s.setTurnIndexToLocked(game, nextStarter)
+
 	if s.tryEndGameLocked(io, state, game) {
 		return "", ""
 	}
@@ -490,15 +503,19 @@ func (s *roomStore) onTimerTick(io *server.Server, roomID string) {
 }
 
 func (s *roomStore) flushRoundLocked(io *server.Server, state *RoomState, game *GameState, byPlayerID string) {
-	lastBettorID := game.LastBetPlayerID
+	firstBettorID := game.FirstBetPlayerID
 	io.To(server.Room(state.ID)).Emit("round_reset", map[string]any{
 		"reason": "pass_flush",
 		"by":     byPlayerID,
 	})
-	nextStarter := s.nextActiveAfterLocked(game, game.FirstBetPlayerID)
-	s.resetRoundLocked(game, nextStarter)
-	// Flush resolves the last unresolved bet.
-	s.recordIfFinishedLocked(game, lastBettorID)
+	// Order matters (see docs/game-logic.md §9.2.4): clear round state first so the
+	// just-resolved 0-card last bettor (and any other 0-card players) become eligible
+	// to be marked finished, then sweep finished BEFORE picking the next starter so
+	// a finished player can never land on TurnIndex.
+	s.resetRoundLocked(game, "")
+	s.sweepFinishedLocked(game)
+	nextStarter := s.nextHandedAfterLocked(game, firstBettorID)
+	s.setTurnIndexToLocked(game, nextStarter)
 	if s.tryEndGameLocked(io, state, game) {
 		return
 	}
@@ -638,20 +655,29 @@ func (s *roomStore) handlePlayerDepartureLocked(
 	}
 
 	// If round hasn't started with first bet yet, terminate and restart clean.
+	// See docs/game-logic.md §9.2.4: starter selection at round boundaries must
+	// require Hands>0 so a 0-card unresolved-bet player is never left on TurnIndex.
 	if game.CurrentBet == nil {
-		nextStarter := game.currentPlayerID()
-		if nextStarter == "" || len(game.Hands[nextStarter]) == 0 {
-			nextStarter = s.nextActiveAfterLocked(game, departedSocketID)
+		s.resetRoundLocked(game, "")
+		s.sweepFinishedLocked(game)
+		nextStarter := s.nextHandedAfterLocked(game, departedSocketID)
+		s.setTurnIndexToLocked(game, nextStarter)
+		if s.tryEndGameLocked(io, state, game) {
+			return departureGameEnd
 		}
-		s.resetRoundLocked(game, nextStarter)
 		s.resetTurnDeadlineLocked(state, game)
 		return departureRoundReset
 	}
 
 	// Last bettor left before loop completion => terminate current round.
 	if wasLastBettor {
-		nextStarter := s.nextActiveAfterLocked(game, departedSocketID)
-		s.resetRoundLocked(game, nextStarter)
+		s.resetRoundLocked(game, "")
+		s.sweepFinishedLocked(game)
+		nextStarter := s.nextHandedAfterLocked(game, departedSocketID)
+		s.setTurnIndexToLocked(game, nextStarter)
+		if s.tryEndGameLocked(io, state, game) {
+			return departureGameEnd
+		}
 		s.resetTurnDeadlineLocked(state, game)
 		return departureRoundReset
 	}
@@ -824,6 +850,65 @@ func (s *roomStore) isActiveForRoundLocked(game *GameState, playerID string) boo
 		return true
 	}
 	return game.CurrentBet != nil && game.LastBetPlayerID == playerID
+}
+
+// nextHandedAfterLocked returns the next player after anchorID in turn order whose
+// Hands has cards (strictly len > 0). Unlike nextActiveAfterLocked, this helper does
+// NOT exempt the unresolved-bet last bettor, so it is the correct choice for
+// round-boundary starter selection (after the previous bet has been resolved).
+// Returns "" if no eligible player exists.
+func (s *roomStore) nextHandedAfterLocked(game *GameState, anchorID string) string {
+	if len(game.TurnOrder) == 0 {
+		return ""
+	}
+	start := -1
+	for i, id := range game.TurnOrder {
+		if id == anchorID {
+			start = i
+			break
+		}
+	}
+	if start == -1 {
+		// Anchor not in turn order (e.g. already-departed player). Fall back to
+		// scanning forward from the current TurnIndex so we still walk the full ring.
+		start = game.TurnIndex - 1
+		if start < 0 {
+			start = len(game.TurnOrder) - 1
+		}
+	}
+	idx := start
+	for i := 0; i < len(game.TurnOrder); i++ {
+		idx = (idx + 1) % len(game.TurnOrder)
+		nextID := game.TurnOrder[idx]
+		if len(game.Hands[nextID]) > 0 {
+			return nextID
+		}
+	}
+	return ""
+}
+
+// setTurnIndexToLocked positions TurnIndex on playerID. No-op if playerID is empty
+// or not present in TurnOrder.
+func (s *roomStore) setTurnIndexToLocked(game *GameState, playerID string) {
+	if playerID == "" {
+		return
+	}
+	for idx, id := range game.TurnOrder {
+		if id == playerID {
+			game.TurnIndex = idx
+			return
+		}
+	}
+}
+
+// sweepFinishedLocked records every TurnOrder player whose hand is currently empty
+// as finished (in turn-order traversal order). The unresolved-bet guard inside
+// recordIfFinishedLocked still protects an active last bettor when CurrentBet != nil,
+// so this is safe to call any time and ideal immediately after resetRoundLocked("").
+func (s *roomStore) sweepFinishedLocked(game *GameState) {
+	for _, id := range game.TurnOrder {
+		s.recordIfFinishedLocked(game, id)
+	}
 }
 
 func (s *roomStore) resetTurnDeadlineLocked(state *RoomState, game *GameState) {

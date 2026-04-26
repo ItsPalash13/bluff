@@ -126,8 +126,10 @@ export function Lobby({
                   sx={{
                     width: 64,
                     height: 64,
-                    border: isCurrentTurn ? '3px solid #22c55e' : '2px solid #cbd5e1',
-                    boxShadow: isCurrentTurn ? '0 0 0 3px rgba(34, 197, 94, 0.25)' : 'none',
+                    border: isCurrentTurn ? '4px solid #22c55e' : '2px solid #cbd5e1',
+                    boxShadow: isCurrentTurn
+                      ? '0 0 0 3px rgba(16, 185, 129, 0.45), 0 0 20px rgba(34, 197, 94, 0.65), 0 0 34px rgba(34, 197, 94, 0.4)'
+                      : 'none',
                   }}
                 />
                 {isHost ? (
