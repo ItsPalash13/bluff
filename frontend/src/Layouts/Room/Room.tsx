@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
+  Avatar,
   Box,
   Button,
   Dialog,
@@ -15,6 +16,8 @@ import { RankingBoard } from '../../components/RankingBoard'
 import { useAppSocket } from '../../state/SocketProvider'
 import { useAppDispatch, useAppSelector } from '../../store/hooks'
 import { setCommentOpen } from '../../store/uiSlice'
+import { getCharacterCount, getCharacterImageUrlByIndex } from '../../assets/characters/characterImageSources'
+import { theme1 } from '../../theme/theme1'
 import backMaroon from '../../assets/card/png/2x/back-maroon.png'
 import type { RoomMessage, RoomSession, RoomState, TurnUpdatePayload } from '../roomTypes'
 import { HandDockDesktop } from './HandCards/HandDockDesktop'
@@ -94,6 +97,26 @@ export function Room({ roomSession }: RoomProps) {
 
   const lastBettorId = turnUpdate?.lastBetPlayerId ?? ''
   const lastBettorName = lastBettorId ? nameBySocketId[lastBettorId] ?? '' : ''
+  const lastBettorUser = useMemo(
+    () => (lastBettorId ? roomState.users.find((u) => u.socketId === lastBettorId) : undefined),
+    [lastBettorId, roomState.users],
+  )
+  const handThemeId = theme1.pokerFelt.green.characterFolder
+  const lastBettorAvatarUrl = useMemo(() => {
+    if (!lastBettorUser) return ''
+    const n = getCharacterCount(handThemeId)
+    return getCharacterImageUrlByIndex(
+      handThemeId,
+      Math.min(Math.max(0, lastBettorUser.characterIndex), n - 1),
+    )
+  }, [lastBettorUser, handThemeId])
+  const hasLastBettorUi = Boolean(
+    lastBettorId && (lastBettorName || lastBettorUser?.name),
+  )
+  const currentBet = turnUpdate?.currentBet
+  const hasLastBetUi = Boolean(
+    currentBet && currentBet.count > 0 && currentBet.rank,
+  )
   const pileCount = turnUpdate?.pileCount ?? 0
   const pileVisualCount = pileCount === 0 ? 1 : Math.min(8, Math.max(1, pileCount))
 
@@ -268,14 +291,26 @@ export function Room({ roomSession }: RoomProps) {
           sx={{ background: 'transparent', backgroundImage: 'none', boxShadow: 'none' }}
         >
           <Box className="game-center">
-            <Box
-              className={`last-bettor-circle${lastBettorId ? '' : ' last-bettor-circle--empty'}`}
-            >
-              <Typography className="last-bettor-circle__label">Last Bettor</Typography>
-              <Typography className="last-bettor-circle__value" component="div">
-                {lastBettorId && lastBettorName ? lastBettorName : '--'}
-              </Typography>
-            </Box>
+            {hasLastBettorUi ? (
+              <Box
+                className="last-bettor-panel"
+                aria-label={lastBettorName || lastBettorUser?.name}
+              >
+                <Avatar
+                  className="last-bettor-panel__avatar"
+                  src={lastBettorAvatarUrl || undefined}
+                  alt=""
+                >
+                  {(lastBettorName || lastBettorUser?.name || '?')
+                    .trim()
+                    .charAt(0)
+                    .toUpperCase()}
+                </Avatar>
+                <Typography className="last-bettor-panel__name" component="span" noWrap title={lastBettorName || lastBettorUser?.name}>
+                  {lastBettorName || lastBettorUser?.name}
+                </Typography>
+              </Box>
+            ) : null}
 
             <Box className="pile-stack" aria-label={`Pile of ${pileCount} cards`}>
               {pileCount === 0 ? (
@@ -309,23 +344,19 @@ export function Room({ roomSession }: RoomProps) {
               </Box>
             </Box>
 
-            <Box
-              className={`last-bet-circle${turnUpdate?.currentBet ? '' : ' last-bet-circle--empty'}`}
-            >
-              <Typography className="last-bet-circle__label">Last Bet</Typography>
-              {turnUpdate?.currentBet ? (
-                <>
-                  <Typography className="last-bet-circle__count">
-                    {turnUpdate.currentBet.count}
-                  </Typography>
-                  <Typography className="last-bet-circle__rank">
-                    {turnUpdate.currentBet.rank}
-                  </Typography>
-                </>
-              ) : (
-                <Typography className="last-bet-circle__count">--</Typography>
-              )}
-            </Box>
+            {hasLastBetUi && currentBet ? (
+              <Box
+                className="last-bet-tile"
+                aria-label={`${currentBet.count} times ${currentBet.rank}`}
+              >
+                <Box className="last-bet-tile__stack">
+                  <span className="last-bet-tile__rank-box">{currentBet.rank}</span>
+                  <span className="last-bet-tile__mult-badge" aria-hidden>
+                    x{currentBet.count}
+                  </span>
+                </Box>
+              </Box>
+            ) : null}
           </Box>
 
           <HandRackMobile
