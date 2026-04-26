@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import ClickAwayListener from '@mui/material/ClickAwayListener'
 import { IconButton, InputBase, Paper, Stack, useMediaQuery } from '@mui/material'
 import SendIcon from '@mui/icons-material/Send'
@@ -8,6 +8,7 @@ const QUICK_EMOJIS = ['😀', '😂', '👍', '🔥', '🎉']
 
 export function CommentBox({ open, onClose, onSend }) {
   const [draftMessage, setDraftMessage] = useState('')
+  const textInputRef = useRef(null)
   const muiTheme = useTheme()
   const isMobile = useMediaQuery(muiTheme.breakpoints.down('sm'))
   const canSend = useMemo(() => draftMessage.trim().length > 0, [draftMessage])
@@ -51,7 +52,10 @@ export function CommentBox({ open, onClose, onSend }) {
               <IconButton
                 key={emoji}
                 size="small"
-                onClick={() => setDraftMessage((prev) => `${prev}${emoji}`)}
+                onClick={() => {
+                  setDraftMessage((prev) => `${prev}${emoji}`)
+                  queueMicrotask(() => textInputRef.current?.focus())
+                }}
                 sx={{ color: '#f8fafc' }}
               >
                 <span>{emoji}</span>
@@ -75,6 +79,7 @@ export function CommentBox({ open, onClose, onSend }) {
             }}
           >
             <InputBase
+              inputRef={textInputRef}
               sx={{ ml: 1, flex: 1, color: '#0f172a' }}
               placeholder="Type a comment..."
               value={draftMessage}

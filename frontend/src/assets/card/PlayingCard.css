@@ -1,9 +1,15 @@
 .playing-card {
+  --playing-card-mat: 1.5px;
+  --playing-card-frame: 2px solid #fff;
   max-width: min(220px, 100%);
   width: auto;
   height: auto;
   display: block;
+  box-sizing: border-box;
   border-radius: 8px;
+  border: var(--playing-card-frame);
+  padding: var(--playing-card-mat);
+  background: #000;
   box-shadow: var(--shadow);
   vertical-align: middle;
   transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease;
@@ -14,31 +20,35 @@
   min-height: 280px;
   max-width: 100%;
   border-radius: 8px;
-  border: 1px dashed var(--border);
-  background: var(--code-bg);
+  border: var(--playing-card-frame, 1px solid #fff);
+  background: #000;
+  box-sizing: border-box;
+  padding: var(--playing-card-mat, 2px);
   box-shadow: var(--shadow);
 }
 
 button.playing-card {
   appearance: none;
-  background: transparent;
-  border: 0;
-  padding: 0;
   margin: 0;
   cursor: pointer;
   outline: none;
   font: inherit;
   color: inherit;
-  box-shadow: none;
+  /* Frame + mat from .playing-card; override transparent reset */
+  background: #000;
+  border: var(--playing-card-frame, 1px solid #fff);
+  box-sizing: border-box;
   border-radius: 8px;
+  padding: var(--playing-card-mat, 2px);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.35);
 }
 
 button.playing-card > img {
   display: block;
   width: 100%;
   height: auto;
-  border-radius: 8px;
-  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.35);
+  border-radius: 5px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
   pointer-events: none;
   user-select: none;
 }
@@ -70,11 +80,10 @@ button.playing-card > img {
 
 .playing-card--selected > img {
   box-shadow: 0 16px 28px rgba(0, 0, 0, 0.55);
-  filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.95))
-    drop-shadow(0 0 14px rgba(56, 189, 248, 0.55));
-  outline: 3px solid rgba(56, 189, 248, 0.9);
-  outline-offset: -2px;
-  border-radius: 8px;
+  filter: drop-shadow(0 0 4px rgba(56, 189, 248, 0.35));
+  outline: 2px solid rgba(56, 189, 248, 0.55);
+  outline-offset: -1px;
+  border-radius: 5px;
 }
 
 .playing-card--disabled {

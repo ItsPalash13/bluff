@@ -84,7 +84,7 @@ export function RoomSettings({
         </Typography>
       ) : !canEdit ? (
         <Typography sx={{ color: 'rgba(203, 213, 225, 0.95)', fontSize: '0.9rem' }}>
-          Only the host can change these settings.
+          Waiting for the host to start the game.
         </Typography>
       ) : null}
 

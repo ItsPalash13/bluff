@@ -15,9 +15,10 @@ import { RankingBoard } from '../../components/RankingBoard'
 import { useAppSocket } from '../../state/SocketProvider'
 import { useAppDispatch, useAppSelector } from '../../store/hooks'
 import { setCommentOpen } from '../../store/uiSlice'
-import { PlayingCard, toPlayingCardProps } from '../../assets/card/PlayingCard'
 import backMaroon from '../../assets/card/png/2x/back-maroon.png'
 import type { RoomMessage, RoomSession, RoomState, TurnUpdatePayload } from '../roomTypes'
+import { HandDockDesktop } from './HandCards/HandDockDesktop'
+import { HandRackMobile } from './HandCards/HandRackMobile'
 import '../../App.css'
 
 type RoomProps = {
@@ -48,6 +49,9 @@ export function Room({ roomSession }: RoomProps) {
   const [gameStatus, setGameStatus] = useState(roomSession.room.status || 'waiting')
   const [selectedCardIds, setSelectedCardIds] = useState<string[]>([])
   const [rankModalOpen, setRankModalOpen] = useState(false)
+  const [viewportWidth, setViewportWidth] = useState(() =>
+    typeof window === 'undefined' ? 1024 : window.innerWidth,
+  )
   const [gameEndSummary, setGameEndSummary] = useState<{
     finishedPlayers: string[]
     playerNames?: Record<string, string>
@@ -67,9 +71,9 @@ export function Room({ roomSession }: RoomProps) {
 
   const isMyTurn = Boolean(turnUpdate && mySocketId && turnUpdate.currentPlayerId === mySocketId)
   const hasCurrentBet = Boolean(turnUpdate?.currentBet)
-  const isSetup = roomStatus === 'setup'
   const isInRound = roomStatus === 'in_round'
   const isGameEnd = roomStatus === 'game_end'
+  const showGameUi = roomStatus !== 'waiting' && !isGameEnd
 
   const selectedCount = selectedCardIds.length
   const roundRank = turnUpdate?.currentBet?.rank ?? ''
@@ -88,9 +92,6 @@ export function Room({ roomSession }: RoomProps) {
     [roomState.users],
   )
 
-  const currentPlayerName = turnUpdate?.currentPlayerId
-    ? nameBySocketId[turnUpdate.currentPlayerId] ?? turnUpdate.currentPlayerId
-    : '-'
   const lastBettorId = turnUpdate?.lastBetPlayerId ?? ''
   const lastBettorName = lastBettorId ? nameBySocketId[lastBettorId] ?? '' : ''
   const pileCount = turnUpdate?.pileCount ?? 0
@@ -219,12 +220,17 @@ export function Room({ roomSession }: RoomProps) {
     }
   }
 
+  useEffect(() => {
+    const onResize = () => setViewportWidth(window.innerWidth)
+    window.addEventListener('resize', onResize, { passive: true })
+    onResize()
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
   const hand = turnUpdate?.yourHand ?? []
-  const handCount = hand.length
-  const handOverlapPx = handCount > 10 ? -32 : handCount > 8 ? -20 : handCount > 6 ? -8 : 0
 
   return (
-    <Box className="lobby-center room-stage">
+    <Box className={`lobby-center room-stage${showGameUi ? ' room-stage--in-game' : ''}`}>
       <Lobby
         room={roomState}
         lastMessage={lastMessage}
@@ -254,61 +260,13 @@ export function Room({ roomSession }: RoomProps) {
           playerNamesFromGame={gameEndSummary?.playerNames}
         />
       ) : (
-        <Paper className="game-shell" elevation={0}>
-          <Box className="game-top">
-            <Typography className="game-title">Game Status: {roomStatus.toUpperCase()}</Typography>
-            {isSetup ? <Typography className="game-note">Setting up game...</Typography> : null}
-            {turnUpdate ? (
-              <>
-                <Typography>Current Turn: {currentPlayerName}</Typography>
-                <Typography>
-                  Timer:{' '}
-                  {roomState.turnSeconds <= 0 || (turnUpdate.secondsLeft ?? 0) < 0
-                    ? 'Off'
-                    : `${Math.max(0, turnUpdate.secondsLeft ?? 0)}s`}
-                </Typography>
-                {!turnUpdate.currentBet ? (
-                  <Typography className="game-note">
-                    No active bet. Current player must initiate a new bet.
-                  </Typography>
-                ) : null}
-              </>
-            ) : (
-              <Typography>Waiting for game updates...</Typography>
-            )}
-          </Box>
-
-          <Box className="game-actions-row">
-            <Button
-              className="game-action-btn game-action-btn--open"
-              variant="contained"
-              color="warning"
-              onClick={handleCallBluff}
-              disabled={!canCallBluff}
-            >
-              Open
-            </Button>
-            <Button
-              className="game-action-btn game-action-btn--bluff"
-              variant="contained"
-              onClick={handleBluffClick}
-              disabled={!canSubmitBet}
-            >
-              BLUFF
-            </Button>
-            <Button
-              className="game-action-btn game-action-btn--pass"
-              variant="contained"
-              onClick={handlePass}
-              disabled={!canPass}
-            >
-              Pass
-            </Button>
-            <Box className="game-action-meta" aria-live="polite">
-              {selectedCount > 0 ? `${selectedCount} selected` : 'Pick cards'}
-            </Box>
-          </Box>
-
+        <>
+        <Paper
+          className="game-shell"
+          elevation={0}
+          square
+          sx={{ background: 'transparent', backgroundImage: 'none', boxShadow: 'none' }}
+        >
           <Box className="game-center">
             <Box
               className={`last-bettor-circle${lastBettorId ? '' : ' last-bettor-circle--empty'}`}
@@ -370,38 +328,55 @@ export function Room({ roomSession }: RoomProps) {
             </Box>
           </Box>
 
-          <Box className="game-bottom">
-            <Box className="hand-row" role="list" aria-label="Your cards">
-              {hand.map((card, i) => {
-                const cardProps = toPlayingCardProps(card)
-                const selected = selectedCardIds.includes(card.id)
-                const disabled =
-                  !isMyTurn ||
-                  !isInRound ||
-                  (!selected && selectedCardIds.length >= 4)
-                return (
-                  <PlayingCard
-                    key={card.id}
-                    label={cardProps.label}
-                    rank={cardProps.rank}
-                    selected={selected}
-                    disabled={disabled}
-                    onClick={() => handleToggleCard(card.id)}
-                    style={{
-                      position: 'relative',
-                      // Later cards sit above earlier ones; selection only lifts (translateY), no z-index jump.
-                      zIndex: i + 1,
-                      marginLeft: i === 0 ? 0 : `${handOverlapPx}px`,
-                    }}
-                  />
-                )
-              })}
-              {hand.length === 0 ? (
-                <Typography className="hand-row__empty">No cards in hand.</Typography>
-              ) : null}
-            </Box>
-          </Box>
+          <HandRackMobile
+            hand={hand}
+            selectedCardIds={selectedCardIds}
+            isMyTurn={isMyTurn}
+            isInRound={isInRound}
+            onToggle={handleToggleCard}
+            viewportWidth={viewportWidth}
+          />
         </Paper>
+
+        <Box className="game-actions-wrap">
+          <Box className="game-actions-row" role="toolbar" aria-label="Game actions">
+            <Button
+              className="game-action-btn game-action-btn--open"
+              variant="contained"
+              color="warning"
+              onClick={handleCallBluff}
+              disabled={!canCallBluff}
+            >
+              Open
+            </Button>
+            <Button
+              className="game-action-btn game-action-btn--bluff"
+              variant="contained"
+              onClick={handleBluffClick}
+              disabled={!canSubmitBet}
+            >
+              BLUFF
+            </Button>
+            <Button
+              className="game-action-btn game-action-btn--pass"
+              variant="contained"
+              onClick={handlePass}
+              disabled={!canPass}
+            >
+              Pass
+            </Button>
+          </Box>
+        </Box>
+
+        <HandDockDesktop
+          hand={hand}
+          selectedCardIds={selectedCardIds}
+          isMyTurn={isMyTurn}
+          isInRound={isInRound}
+          onToggle={handleToggleCard}
+          viewportWidth={viewportWidth}
+        />
+        </>
       )}
 
       <Dialog

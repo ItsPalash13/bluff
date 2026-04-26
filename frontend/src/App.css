@@ -23,6 +23,28 @@
   padding-top: 16px;
 }
 
+/* In play: no horizontal .lobby-center gutter so the green table fills the width */
+.lobby-center.room-stage.room-stage--in-game {
+  padding-left: max(0px, env(safe-area-inset-left, 0px));
+  padding-right: max(0px, env(safe-area-inset-right, 0px));
+}
+
+/* Reserve space for the peeking hand (only top ~half of cards is on-screen); phone uses in-flow hand */
+.room-stage--in-game {
+  /* Full table width: avoid dark “letterbox” from .room-stage max-width + #root when the window resizes */
+  max-width: none;
+  width: 100%;
+  padding-bottom: min(140px, 22vh);
+  box-sizing: border-box;
+}
+
+@media (max-width: 700px) {
+  /* Space for fixed bottom game-action bar (see .game-actions-wrap) */
+  .room-stage--in-game {
+    padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
 .room-stage__header {
   align-self: flex-start;
 }
@@ -204,6 +226,53 @@
   background: #f8fafc !important;
 }
 
+@media (max-width: 700px) {
+  .room-comment-fab {
+    top: max(10px, env(safe-area-inset-top, 0px)) !important;
+    right: max(12px, env(safe-area-inset-right, 0px)) !important;
+    bottom: auto !important;
+  }
+}
+
+/* CommentBox wrapper (CommentBox component unchanged): center panel + dim backdrop; pointer-events for hit-testing */
+.comment-box-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1390;
+}
+
+.comment-box-overlay__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background: rgba(0, 0, 0, 0.6);
+  pointer-events: auto;
+}
+
+.comment-box-overlay__slot {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.comment-box-overlay__slot * {
+  pointer-events: auto;
+}
+
+/* Outer shell: the Paper that contains the white inner form Paper; inner has no nested MuiPaper */
+.comment-box-overlay__slot .MuiPaper-root:has(> * .MuiPaper-root) {
+  bottom: auto !important;
+  top: 50% !important;
+  left: 50% !important;
+  right: auto !important;
+  transform: translate(-50%, -50%) !important;
+  max-width: min(100vw - 32px, 400px) !important;
+  width: min(100vw - 32px, 400px) !important;
+  border-radius: 14px !important;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4) !important;
+}
+
 .lobby-panel {
   width: min(640px, 100%);
   border-radius: 14px;
@@ -380,32 +449,27 @@
 
 .game-shell {
   width: min(980px, 100%);
-  margin: 20px auto 0;
-  border-radius: 14px !important;
-  padding: 16px;
-  background: rgba(0, 0, 0, 0.32) !important;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  margin: 12px auto 0;
+  padding: 12px 16px 8px;
+  background: transparent !important;
+  background-image: none !important;
+  border: none !important;
+  box-shadow: none !important;
   display: grid;
-  gap: 14px;
+  gap: 16px;
 }
 
-.game-top,
-.game-bottom {
-  border-radius: 10px;
-  padding: 12px;
-  background: rgba(0, 0, 0, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: #f8fafc;
+/* Wraps Open / BLUFF / Pass (+ meta on desktop); on phone the bar is fixed like a bottom nav */
+.game-actions-wrap {
+  width: min(980px, 100%);
+  margin: 0 auto;
+  box-sizing: border-box;
 }
 
-.game-title {
-  font-weight: 700 !important;
-  margin-bottom: 6px !important;
-}
-
-.game-note {
-  margin-bottom: 6px !important;
-  color: #d1fae5;
+.room-stage--in-game .game-shell,
+.room-stage--in-game .game-actions-wrap {
+  max-width: none;
+  width: 100%;
 }
 
 .game-actions-row {
@@ -413,8 +477,53 @@
   justify-content: center;
   align-items: center;
   gap: 14px;
-  padding: 8px 0 4px;
+  padding: 4px 0 0;
   flex-wrap: wrap;
+}
+
+@media (max-width: 700px) {
+  .game-actions-wrap {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    max-width: none;
+    z-index: 12;
+    margin: 0;
+    padding: 0 0 env(safe-area-inset-bottom, 0);
+    background: rgba(15, 23, 42, 0.98);
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.4);
+  }
+
+  .game-actions-wrap .game-actions-row {
+    flex-wrap: nowrap;
+    justify-content: stretch;
+    align-items: stretch;
+    gap: 0;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+  }
+
+  .game-actions-wrap .game-action-btn.game-action-btn--open,
+  .game-actions-wrap .game-action-btn.game-action-btn--bluff,
+  .game-actions-wrap .game-action-btn.game-action-btn--pass {
+    flex: 1 1 0;
+    min-width: 0 !important;
+    min-height: 52px;
+    margin: 0 !important;
+    padding: 8px 4px !important;
+    font-size: 0.8rem !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  .game-actions-wrap .game-action-btn + .game-action-btn {
+    border-left: 1px solid rgba(0, 0, 0, 0.5) !important;
+  }
 }
 
 .game-action-btn {
@@ -461,18 +570,6 @@
   background: linear-gradient(180deg, #dde5ee 0%, #a6b2c2 100%) !important;
 }
 
-.game-action-meta {
-  margin-left: 4px;
-  padding: 6px 12px;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.45);
-  color: #f1f5f9;
-  font-size: 0.8rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-}
-
 .game-center {
   display: flex;
   align-items: center;
@@ -483,8 +580,8 @@
 
 .pile-stack {
   position: relative;
-  width: 120px;
-  height: 168px;
+  width: 136px;
+  height: 190px;
 }
 
 .pile-stack__card {
@@ -507,10 +604,10 @@
 
 .pile-count-badge {
   position: absolute;
-  right: -10px;
-  top: -10px;
-  min-width: 32px;
-  height: 32px;
+  right: -8px;
+  top: -8px;
+  min-width: 34px;
+  height: 34px;
   display: grid;
   place-content: center;
   place-items: center;
@@ -621,22 +718,115 @@
   margin-top: 2px !important;
 }
 
-.hand-row {
+/* Phone: in-flow hand under the pile; desktop uses fixed bottom dock */
+.hand-rack-mobile {
+  display: none;
+  width: 100%;
+  max-width: 100%;
+  margin: 0 auto 4px;
+  padding: 4px 6px 12px;
+  box-sizing: border-box;
+  overflow: visible;
+}
+
+.hand-rack-mobile__row {
   display: flex;
   flex-wrap: nowrap;
   justify-content: center;
   align-items: flex-end;
-  gap: 6px;
-  padding: 28px 8px 8px;
+  width: 100%;
+  min-width: 0;
   overflow: visible;
+  position: relative;
 }
 
-.hand-row .playing-card {
-  width: clamp(56px, 6vw, 84px);
-  height: auto;
-  border-radius: 8px;
+.hand-rack-mobile__row .playing-card {
+  width: clamp(80px, 12.5vw, 140px);
   flex: 0 0 auto;
-  /* z-index is set per-card in Room so rightward cards stay on top; no boost on :hover/selected. */
+}
+
+.hand-rack-mobile__empty {
+  color: #cbd5e1;
+  font-size: 0.9rem;
+  font-style: italic;
+  text-align: center;
+  padding: 8px 0 12px;
+}
+
+@media (min-width: 701px) {
+  .hand-rack-mobile {
+    display: none !important;
+  }
+}
+
+@media (max-width: 700px) {
+  .hand-rack-mobile {
+    display: block;
+  }
+}
+
+/* Bottom dock: at most 90% of the viewport width, centered; cards fan inside this strip */
+.room-hand-dock {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  width: 90vw;
+  max-width: 90vw;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  padding: 0 max(12px, env(safe-area-inset-left, 0px)) max(12px, env(safe-area-inset-bottom, 0px))
+    max(12px, env(safe-area-inset-right, 0px));
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+@media (max-width: 700px) {
+  .room-hand-dock--desktop {
+    display: none !important;
+  }
+}
+
+.room-hand-dock .hand-row {
+  pointer-events: auto;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  background: none;
+  border: 0;
+  box-shadow: none;
+}
+
+/* 50% of this band (cards + lift room) is below the viewport so ~half of each card peeks in */
+.room-hand-dock .hand-row__peek {
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: center;
+  align-items: flex-end;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 28px 0 0;
+  overflow: visible;
+  /* Was 50% (half off-screen); nudge up so a bit more card shows */
+  transform: translateY(calc(50% - 28px));
+  box-sizing: border-box;
+}
+
+.hand-row {
+  display: block;
+  width: 100%;
+}
+
+/* Big cards, spread within dock (larger clamp so ~90% width fills for typical counts) */
+.room-hand-dock .hand-row__peek .playing-card {
+  width: clamp(80px, 12.5vw, 140px);
+  flex: 0 0 auto;
 }
 
 .hand-row__empty {

@@ -52,9 +52,10 @@
 }
 
 #root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
+  /* Full-bleed shell so the table background isn’t letterboxed; center content in views that need a max width */
+  width: 100%;
+  max-width: none;
+  margin: 0;
   text-align: center;
   min-height: 100svh;
   display: flex;

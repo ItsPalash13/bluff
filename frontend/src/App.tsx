@@ -55,6 +55,7 @@ function AppShell() {
     if (!nextMessage) return
     const activeSocket = ensureConnected()
     activeSocket.emit('room:message', { message: nextMessage })
+    dispatch(setCommentOpen(false))
   }
 
   const shouldShowCommentBox = commentOpen && isConnected
@@ -67,11 +68,22 @@ function AppShell() {
   ) : (
     <>
       <Room roomSession={roomSession} />
-      <CommentBox
-        open={shouldShowCommentBox}
-        onClose={() => dispatch(setCommentOpen(false))}
-        onSend={handleCommentSend}
-      />
+      {shouldShowCommentBox ? (
+        <div className="comment-box-overlay" role="dialog" aria-label="Chat">
+          <div
+            className="comment-box-overlay__backdrop"
+            role="presentation"
+            onClick={() => dispatch(setCommentOpen(false))}
+          />
+          <div className="comment-box-overlay__slot">
+            <CommentBox
+              open
+              onClose={() => dispatch(setCommentOpen(false))}
+              onSend={handleCommentSend}
+            />
+          </div>
+        </div>
+      ) : null}
     </>
   )
 
