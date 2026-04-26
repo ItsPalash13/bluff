@@ -487,6 +487,7 @@ export function Room({ roomSession }: RoomProps) {
           ranking={gameEndSummary?.finishedPlayers ?? []}
           nameBySocketId={nameBySocketId}
           playerNamesFromGame={gameEndSummary?.playerNames}
+          users={roomState.users}
         />
       ) : (
         <>
