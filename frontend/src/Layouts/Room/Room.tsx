@@ -2,16 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   Box,
   Button,
-  FormControl,
-  FormControlLabel,
+  Dialog,
   IconButton,
-  InputLabel,
-  MenuItem,
   Paper,
-  Select,
-  Chip,
   Typography,
-  Checkbox,
 } from '@mui/material'
 import ChatIcon from '@mui/icons-material/Chat'
 import { useMatch } from 'react-router-dom'
@@ -21,12 +15,28 @@ import { RankingBoard } from '../../components/RankingBoard'
 import { useAppSocket } from '../../state/SocketProvider'
 import { useAppDispatch, useAppSelector } from '../../store/hooks'
 import { setCommentOpen } from '../../store/uiSlice'
+import { PlayingCard, toPlayingCardProps } from '../../assets/card/PlayingCard'
+import backMaroon from '../../assets/card/png/2x/back-maroon.png'
 import type { RoomMessage, RoomSession, RoomState, TurnUpdatePayload } from '../roomTypes'
 import '../../App.css'
 
 type RoomProps = {
   roomSession: RoomSession
 }
+
+const RANK_ORDER = ['A', 'K', 'Q', 'J', '10', '9', '8', '7', '6', '5', '4', '3', '2']
+
+const PILE_ROTATIONS = [-12, 7, -3, 14, -8, 4, -15, 9]
+const PILE_OFFSETS: Array<[number, number]> = [
+  [0, 0],
+  [-4, 2],
+  [3, -2],
+  [-2, 4],
+  [5, 1],
+  [-5, -3],
+  [2, 5],
+  [-3, -2],
+]
 
 export function Room({ roomSession }: RoomProps) {
   const { socket } = useAppSocket()
@@ -36,8 +46,8 @@ export function Room({ roomSession }: RoomProps) {
   const [lastMessage, setLastMessage] = useState<RoomMessage | null>(null)
   const [turnUpdate, setTurnUpdate] = useState<TurnUpdatePayload | null>(null)
   const [gameStatus, setGameStatus] = useState(roomSession.room.status || 'waiting')
-  const [selectedRank, setSelectedRank] = useState('Q')
   const [selectedCardIds, setSelectedCardIds] = useState<string[]>([])
+  const [rankModalOpen, setRankModalOpen] = useState(false)
   const [gameEndSummary, setGameEndSummary] = useState<{
     finishedPlayers: string[]
     playerNames?: Record<string, string>
@@ -49,11 +59,10 @@ export function Room({ roomSession }: RoomProps) {
   const roomStatus = gameStatus || roomState.status || 'waiting'
   const canEdit = isHost && roomStatus === 'waiting'
   const mySocketId = socket?.id ?? ''
-  const rankOrder = ['A', 'K', 'Q', 'J', '10', '9', '8', '7', '6', '5', '4', '3', '2']
   const rankOptions = useMemo(() => {
     const hand = turnUpdate?.yourHand ?? []
     const uniqueRanks = new Set(hand.map((card) => card.rank))
-    return rankOrder.filter((rank) => uniqueRanks.has(rank))
+    return RANK_ORDER.filter((rank) => uniqueRanks.has(rank))
   }, [turnUpdate])
 
   const isMyTurn = Boolean(turnUpdate && mySocketId && turnUpdate.currentPlayerId === mySocketId)
@@ -64,7 +73,6 @@ export function Room({ roomSession }: RoomProps) {
 
   const selectedCount = selectedCardIds.length
   const roundRank = turnUpdate?.currentBet?.rank ?? ''
-  const effectiveRank = roundRank || selectedRank
   const canSubmitBet = isInRound && isMyTurn && selectedCount > 0 && selectedCount <= 4
   const canPass = isInRound && isMyTurn && hasCurrentBet
   const canCallBluff = useMemo(() => {
@@ -79,12 +87,14 @@ export function Room({ roomSession }: RoomProps) {
       }, {}),
     [roomState.users],
   )
-  useEffect(() => {
-    if (rankOptions.length === 0) return
-    if (!rankOptions.includes(selectedRank)) {
-      setSelectedRank(rankOptions[0])
-    }
-  }, [rankOptions, selectedRank])
+
+  const currentPlayerName = turnUpdate?.currentPlayerId
+    ? nameBySocketId[turnUpdate.currentPlayerId] ?? turnUpdate.currentPlayerId
+    : '-'
+  const lastBettorId = turnUpdate?.lastBetPlayerId ?? ''
+  const lastBettorName = lastBettorId ? nameBySocketId[lastBettorId] ?? '' : ''
+  const pileCount = turnUpdate?.pileCount ?? 0
+  const pileVisualCount = pileCount === 0 ? 1 : Math.min(8, Math.max(1, pileCount))
 
   useEffect(() => {
     if (!socket) {
@@ -170,14 +180,25 @@ export function Room({ roomSession }: RoomProps) {
     })
   }
 
-  const handleSubmitBet = () => {
-    if (!socket || !canSubmitBet) return
+  const handleSubmitBet = (rank: string) => {
+    if (!socket || !canSubmitBet || !rank) return
     socket.emit('game:play_bet', {
       cardIds: selectedCardIds,
-      rank: effectiveRank,
+      rank,
       count: selectedCount,
     })
     setSelectedCardIds([])
+    setRankModalOpen(false)
+  }
+
+  const handleBluffClick = () => {
+    if (!canSubmitBet) return
+    if (roundRank) {
+      handleSubmitBet(roundRank)
+      return
+    }
+    if (rankOptions.length === 0) return
+    setRankModalOpen(true)
   }
 
   const handlePass = () => {
@@ -197,6 +218,10 @@ export function Room({ roomSession }: RoomProps) {
       console.error('Failed to copy room link', error)
     }
   }
+
+  const hand = turnUpdate?.yourHand ?? []
+  const handCount = hand.length
+  const handOverlapPx = handCount > 10 ? -32 : handCount > 8 ? -20 : handCount > 6 ? -8 : 0
 
   return (
     <Box className="lobby-center room-stage">
@@ -235,115 +260,174 @@ export function Room({ roomSession }: RoomProps) {
             {isSetup ? <Typography className="game-note">Setting up game...</Typography> : null}
             {turnUpdate ? (
               <>
-                <Typography>Current Turn: {turnUpdate.currentPlayerId || '-'}</Typography>
+                <Typography>Current Turn: {currentPlayerName}</Typography>
                 <Typography>
                   Timer:{' '}
                   {roomState.turnSeconds <= 0 || (turnUpdate.secondsLeft ?? 0) < 0
                     ? 'Off'
                     : `${Math.max(0, turnUpdate.secondsLeft ?? 0)}s`}
                 </Typography>
-                {turnUpdate.currentBet ? (
-                  <Typography>
-                    Current Bet: {turnUpdate.currentBet.count} x {turnUpdate.currentBet.rank} by {turnUpdate.currentBet.playerId}
+                {!turnUpdate.currentBet ? (
+                  <Typography className="game-note">
+                    No active bet. Current player must initiate a new bet.
                   </Typography>
-                ) : (
-                  <Typography>No active bet. Current player must initiate a new bet.</Typography>
-                )}
-                <Typography>Pile Cards: {turnUpdate.pileCount ?? 0}</Typography>
-                <Typography>
-                  Last Bet: {turnUpdate.currentBet ? `${turnUpdate.currentBet.count} x ${turnUpdate.currentBet.rank}` : 'None'}
-                </Typography>
+                ) : null}
               </>
             ) : (
               <Typography>Waiting for game updates...</Typography>
             )}
           </Box>
 
-          <Box className="game-middle">
-            <Box
-              sx={{
-                display: 'flex',
-                gap: 1.5,
-                flexDirection: { xs: 'column', md: 'row' },
-                alignItems: { xs: 'stretch', md: 'center' },
-              }}
+          <Box className="game-actions-row">
+            <Button
+              className="game-action-btn game-action-btn--open"
+              variant="contained"
+              color="warning"
+              onClick={handleCallBluff}
+              disabled={!canCallBluff}
             >
-              {roundRank ? (
-                <Box className="game-fixed-value">
-                  <Typography variant="caption" sx={{ color: '#cbd5e1' }}>
-                    Round Rank
-                  </Typography>
-                  <Chip size="small" color="success" label={roundRank} />
-                </Box>
-              ) : (
-                <FormControl size="small" className="game-control">
-                  <InputLabel id="rank-label">Rank</InputLabel>
-                  <Select
-                    labelId="rank-label"
-                    value={rankOptions.includes(selectedRank) ? selectedRank : ''}
-                    label="Rank"
-                    onChange={(event) => setSelectedRank(event.target.value)}
-                    disabled={!isMyTurn || !isInRound}
-                  >
-                    {rankOptions.length === 0 ? (
-                      <MenuItem disabled value="">
-                        No ranks available
-                      </MenuItem>
-                    ) : null}
-                    {rankOptions.map((rank) => (
-                      <MenuItem key={rank} value={rank}>
-                        {rank}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              )}
+              Open
+            </Button>
+            <Button
+              className="game-action-btn game-action-btn--bluff"
+              variant="contained"
+              onClick={handleBluffClick}
+              disabled={!canSubmitBet}
+            >
+              BLUFF
+            </Button>
+            <Button
+              className="game-action-btn game-action-btn--pass"
+              variant="contained"
+              onClick={handlePass}
+              disabled={!canPass}
+            >
+              Pass
+            </Button>
+            <Box className="game-action-meta" aria-live="polite">
+              {selectedCount > 0 ? `${selectedCount} selected` : 'Pick cards'}
+            </Box>
+          </Box>
 
-              <Box className="game-fixed-value">
-                <Typography variant="caption" sx={{ color: '#cbd5e1' }}>
-                  Selected Count
-                </Typography>
-                <Chip
-                  size="small"
-                  label={selectedCount || 0}
-                  color={selectedCount > 0 ? 'primary' : 'default'}
+          <Box className="game-center">
+            <Box
+              className={`last-bettor-circle${lastBettorId ? '' : ' last-bettor-circle--empty'}`}
+            >
+              <Typography className="last-bettor-circle__label">Last Bettor</Typography>
+              <Typography className="last-bettor-circle__value" component="div">
+                {lastBettorId && lastBettorName ? lastBettorName : '--'}
+              </Typography>
+            </Box>
+
+            <Box className="pile-stack" aria-label={`Pile of ${pileCount} cards`}>
+              {pileCount === 0 ? (
+                <img
+                  src={backMaroon}
+                  alt=""
+                  className="pile-stack__card pile-stack__card--placeholder"
+                  draggable={false}
                 />
+              ) : (
+                Array.from({ length: pileVisualCount }).map((_, i) => {
+                  const rot = PILE_ROTATIONS[i % PILE_ROTATIONS.length]
+                  const [dx, dy] = PILE_OFFSETS[i % PILE_OFFSETS.length]
+                  return (
+                    <img
+                      key={i}
+                      src={backMaroon}
+                      alt=""
+                      className="pile-stack__card"
+                      draggable={false}
+                      style={{
+                        transform: `translate(${dx}px, ${dy}px) rotate(${rot}deg)`,
+                        zIndex: i,
+                      }}
+                    />
+                  )
+                })
+              )}
+              <Box className="pile-count-badge" aria-label={`${pileCount} cards in pile`}>
+                {pileCount}
               </Box>
+            </Box>
 
-              <Button variant="contained" onClick={handleSubmitBet} disabled={!canSubmitBet}>
-                Submit Bet
-              </Button>
-              <Button variant="outlined" onClick={handlePass} disabled={!canPass}>
-                Pass
-              </Button>
-              <Button variant="outlined" color="warning" onClick={handleCallBluff} disabled={!canCallBluff}>
-                Call Bluff
-              </Button>
+            <Box
+              className={`last-bet-circle${turnUpdate?.currentBet ? '' : ' last-bet-circle--empty'}`}
+            >
+              <Typography className="last-bet-circle__label">Last Bet</Typography>
+              {turnUpdate?.currentBet ? (
+                <>
+                  <Typography className="last-bet-circle__count">
+                    {turnUpdate.currentBet.count}
+                  </Typography>
+                  <Typography className="last-bet-circle__rank">
+                    {turnUpdate.currentBet.rank}
+                  </Typography>
+                </>
+              ) : (
+                <Typography className="last-bet-circle__count">--</Typography>
+              )}
             </Box>
           </Box>
 
           <Box className="game-bottom">
-            <Typography>
-              Your Cards: {turnUpdate?.yourHand?.length ?? 0}
-            </Typography>
-            <Box className="hand-list">
-              {(turnUpdate?.yourHand ?? []).map((card) => (
-                <FormControlLabel
-                  key={card.id}
-                  control={
-                    <Checkbox
-                      checked={selectedCardIds.includes(card.id)}
-                      onChange={() => handleToggleCard(card.id)}
-                      disabled={!isMyTurn || !isInRound || (!selectedCardIds.includes(card.id) && selectedCardIds.length >= 4)}
-                    />
-                  }
-                  label={`${card.rank}${card.suit}`}
-                />
-              ))}
+            <Box className="hand-row" role="list" aria-label="Your cards">
+              {hand.map((card, i) => {
+                const cardProps = toPlayingCardProps(card)
+                const selected = selectedCardIds.includes(card.id)
+                const disabled =
+                  !isMyTurn ||
+                  !isInRound ||
+                  (!selected && selectedCardIds.length >= 4)
+                return (
+                  <PlayingCard
+                    key={card.id}
+                    label={cardProps.label}
+                    rank={cardProps.rank}
+                    selected={selected}
+                    disabled={disabled}
+                    onClick={() => handleToggleCard(card.id)}
+                    style={{
+                      position: 'relative',
+                      // Later cards sit above earlier ones; selection only lifts (translateY), no z-index jump.
+                      zIndex: i + 1,
+                      marginLeft: i === 0 ? 0 : `${handOverlapPx}px`,
+                    }}
+                  />
+                )
+              })}
+              {hand.length === 0 ? (
+                <Typography className="hand-row__empty">No cards in hand.</Typography>
+              ) : null}
             </Box>
           </Box>
         </Paper>
       )}
+
+      <Dialog
+        open={rankModalOpen}
+        onClose={() => setRankModalOpen(false)}
+        classes={{ paper: 'rank-modal' }}
+        slotProps={{ backdrop: { className: 'rank-modal__backdrop' } }}
+      >
+        <Typography className="rank-modal__title">SELECT CARD SERIES</Typography>
+        <Box className="rank-modal__tiles">
+          {rankOptions.length === 0 ? (
+            <Typography className="rank-modal__empty">No ranks available</Typography>
+          ) : (
+            rankOptions.map((r) => (
+              <button
+                key={r}
+                type="button"
+                className="rank-tile"
+                onClick={() => handleSubmitBet(r)}
+              >
+                {r}
+              </button>
+            ))
+          )}
+        </Box>
+      </Dialog>
 
       <IconButton
         className="room-comment-fab"
