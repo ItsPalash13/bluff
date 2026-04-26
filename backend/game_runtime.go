@@ -33,18 +33,18 @@ type BetState struct {
 }
 
 type GameState struct {
-	RoomID            string
-	Status            string
-	TurnOrder         []string
-	TurnIndex         int
-	Hands             map[string][]Card
-	Pile              []Card
-	CurrentBet        *BetState
-	FirstBetPlayerID  string
-	LastBetPlayerID   string
-	LastPlayedCards   []Card
-	PassCount         int
-	FinishedPlayers   []string
+	RoomID           string
+	Status           string
+	TurnOrder        []string
+	TurnIndex        int
+	Hands            map[string][]Card
+	Pile             []Card
+	CurrentBet       *BetState
+	FirstBetPlayerID string
+	LastBetPlayerID  string
+	LastPlayedCards  []Card
+	PassCount        int
+	FinishedPlayers  []string
 	// PlayerNames is filled at game start from room users and kept for game_end
 	// so rankings still show display names after players leave.
 	PlayerNames       map[string]string
@@ -54,10 +54,10 @@ type GameState struct {
 type departureOutcome string
 
 const (
-	departureNoEmit      departureOutcome = "no_emit"
-	departureTurnUpdate  departureOutcome = "turn_update"
-	departureRoundReset  departureOutcome = "round_reset"
-	departureGameEnd     departureOutcome = "game_end"
+	departureNoEmit     departureOutcome = "no_emit"
+	departureTurnUpdate departureOutcome = "turn_update"
+	departureRoundReset departureOutcome = "round_reset"
+	departureGameEnd    departureOutcome = "game_end"
 )
 
 type gamePlayBetPayload struct {
@@ -267,9 +267,9 @@ func (s *roomStore) playBet(io *server.Server, socketID string, p gamePlayBetPay
 	}
 
 	io.To(server.Room(state.ID)).Emit("player_move", map[string]any{
-		"playerId": socketID,
-		"rank":     p.Rank,
-		"count":    p.Count,
+		"playerId":  socketID,
+		"rank":      p.Rank,
+		"count":     p.Count,
 		"pileCount": len(game.Pile),
 	})
 
@@ -317,6 +317,22 @@ func (s *roomStore) passTurn(io *server.Server, socketID string, reason string) 
 	return "", ""
 }
 
+// roomUserDisplayForBluff resolves name and character index for a socket from the live
+// room user list, or from the game's name snapshot if they are no longer in Users.
+func roomUserDisplayForBluff(state *RoomState, game *GameState, socketID string) (name string, characterIndex int) {
+	for i := range state.Users {
+		if state.Users[i].SocketID == socketID {
+			return state.Users[i].Name, state.Users[i].CharacterIndex
+		}
+	}
+	if game != nil && game.PlayerNames != nil {
+		if n, ok := game.PlayerNames[socketID]; ok && strings.TrimSpace(n) != "" {
+			return strings.TrimSpace(n), 0
+		}
+	}
+	return "Player", 0
+}
+
 func (s *roomStore) callBluff(io *server.Server, socketID string) (string, string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -355,12 +371,25 @@ func (s *roomStore) callBluff(io *server.Server, socketID string) (string, strin
 		targetPlayerID = lastBettorID
 		nextStarterID = socketID
 	}
+	// Snapshot reveal data before resetRoundLocked clears LastPlayedCards / CurrentBet.
+	revealCards := append([]Card(nil), game.LastPlayedCards...)
+	claimedRank := game.CurrentBet.Rank
+	claimedCount := game.CurrentBet.Count
+	callerName, callerCharIdx := roomUserDisplayForBluff(state, game, socketID)
+	targetName, targetCharIdx := roomUserDisplayForBluff(state, game, lastBettorID)
 	game.Hands[targetPlayerID] = append(game.Hands[targetPlayerID], game.Pile...)
 	io.To(server.Room(state.ID)).Emit("bluff_result", map[string]any{
-		"callerId":     socketID,
-		"targetId":     lastBettorID,
-		"bluffCaught":  bluffCaught,
-		"pileReceiver": targetPlayerID,
+		"callerId":             socketID,
+		"targetId":             lastBettorID,
+		"callerName":           callerName,
+		"callerCharacterIndex": callerCharIdx,
+		"targetName":           targetName,
+		"targetCharacterIndex": targetCharIdx,
+		"bluffCaught":          bluffCaught,
+		"pileReceiver":         targetPlayerID,
+		"lastPlayedCards":      revealCards,
+		"claimedRank":          claimedRank,
+		"claimedCount":         claimedCount,
 	})
 
 	s.resetRoundLocked(game, nextStarterID)
@@ -371,9 +400,39 @@ func (s *roomStore) callBluff(io *server.Server, socketID string) (string, strin
 	if s.tryEndGameLocked(io, state, game) {
 		return "", ""
 	}
+	// Pause the per-turn timer during the reveal so onTimerTick does not auto-pass
+	// the new starter while clients are still showing the reveal modal.
+	game.CurrentTurnEndsAt = time.Now().Add(time.Hour)
+	roomID := state.ID
+	time.AfterFunc(openRevealHoldDuration, func() {
+		s.finalizeOpenRevealAndStartRound(io, roomID)
+	})
+	return "", ""
+}
+
+const openRevealHoldDuration = 2500 * time.Millisecond
+
+// finalizeOpenRevealAndStartRound is called once the post-Open reveal hold has elapsed.
+// It re-acquires the store mutex, verifies the room/game are still live, resets the
+// turn deadline for the new round and broadcasts a fresh turn_update so clients can
+// dismiss the reveal modal and continue play.
+func (s *roomStore) finalizeOpenRevealAndStartRound(io *server.Server, roomID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	state, ok := s.rooms[roomID]
+	if !ok {
+		return
+	}
+	game, ok := s.games[roomID]
+	if !ok {
+		return
+	}
+	if state.Status != roomStatusInRound || game.Status != roomStatusInRound {
+		return
+	}
 	s.resetTurnDeadlineLocked(state, game)
 	s.emitTurnUpdateLocked(io, state, game)
-	return "", ""
 }
 
 func (s *roomStore) onTimerTick(io *server.Server, roomID string) {
@@ -399,8 +458,8 @@ func (s *roomStore) onTimerTick(io *server.Server, roomID string) {
 
 	currentPlayerID := game.currentPlayerID()
 	io.To(server.Room(roomID)).Emit("timer_tick", map[string]any{
-		"playerId":      currentPlayerID,
-		"secondsLeft":   secondsLeft,
+		"playerId":    currentPlayerID,
+		"secondsLeft": secondsLeft,
 	})
 	if secondsLeft > 0 {
 		return
@@ -492,26 +551,26 @@ func (s *roomStore) resetRoundLocked(game *GameState, starterID string) {
 
 func (s *roomStore) emitGameStartLocked(io *server.Server, state *RoomState, game *GameState) {
 	io.To(server.Room(state.ID)).Emit("game_start", map[string]any{
-		"roomId":     state.ID,
-		"turnOrder":  append([]string(nil), game.TurnOrder...),
+		"roomId":      state.ID,
+		"turnOrder":   append([]string(nil), game.TurnOrder...),
 		"turnSeconds": state.TurnSeconds,
-		"status":     roomStatusInRound,
+		"status":      roomStatusInRound,
 	})
 }
 
 func (s *roomStore) emitTurnUpdateLocked(io *server.Server, state *RoomState, game *GameState) {
 	base := map[string]any{
-		"roomId":            state.ID,
-		"status":            game.Status,
-		"currentPlayerId":   game.currentPlayerID(),
-		"secondsLeft":       s.secondsLeftForClient(state, game),
-		"currentBet":        game.CurrentBet,
-		"pileCount":         len(game.Pile),
-		"lastBetPlayerId":   game.LastBetPlayerID,
-		"firstBetPlayerId":  game.FirstBetPlayerID,
-		"passCount":         game.PassCount,
-		"finishedPlayers":   append([]string(nil), game.FinishedPlayers...),
-		"playerCardCounts":  s.playerCardCountsLocked(game),
+		"roomId":           state.ID,
+		"status":           game.Status,
+		"currentPlayerId":  game.currentPlayerID(),
+		"secondsLeft":      s.secondsLeftForClient(state, game),
+		"currentBet":       game.CurrentBet,
+		"pileCount":        len(game.Pile),
+		"lastBetPlayerId":  game.LastBetPlayerID,
+		"firstBetPlayerId": game.FirstBetPlayerID,
+		"passCount":        game.PassCount,
+		"finishedPlayers":  append([]string(nil), game.FinishedPlayers...),
+		"playerCardCounts": s.playerCardCountsLocked(game),
 	}
 	for _, user := range state.Users {
 		payload := map[string]any{}

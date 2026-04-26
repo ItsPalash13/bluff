@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type AnimationEvent,
+} from 'react'
 import {
   Avatar,
   Box,
@@ -19,9 +26,17 @@ import { setCommentOpen } from '../../store/uiSlice'
 import { getCharacterCount, getCharacterImageUrlByIndex } from '../../assets/characters/characterImageSources'
 import { theme1 } from '../../theme/theme1'
 import backMaroon from '../../assets/card/png/2x/back-maroon.png'
-import type { RoomMessage, RoomSession, RoomState, TurnUpdatePayload } from '../roomTypes'
+import type {
+  BluffResultPayload,
+  GameCard,
+  RoomMessage,
+  RoomSession,
+  RoomState,
+  TurnUpdatePayload,
+} from '../roomTypes'
 import { HandDockDesktop } from './HandCards/HandDockDesktop'
 import { HandRackMobile } from './HandCards/HandRackMobile'
+import { OpenRevealModal, type OpenReveal } from './OpenRevealModal'
 import '../../App.css'
 
 type RoomProps = {
@@ -42,6 +57,61 @@ const PILE_OFFSETS: Array<[number, number]> = [
   [-3, -2],
 ]
 
+// How long to show the post-Open reveal modal before the safety timer clears it,
+// in case the backend's deferred turn_update never reaches this client.
+const OPEN_REVEAL_SAFETY_MS = 8000
+
+/** must match @keyframes name in `App.css` for `onAnimationEnd` */
+const PILE_STACK_FLUSH_RIGHT_NAME = 'pile-stack-flush-right'
+
+function intFromJson(v: unknown): number | undefined {
+  if (typeof v === 'number' && Number.isFinite(v)) return Math.trunc(v)
+  if (typeof v === 'string' && v !== '') {
+    const n = Number(v)
+    if (Number.isFinite(n)) return Math.trunc(n)
+  }
+  return undefined
+}
+
+function parseBluffResultPayload(raw: unknown): BluffResultPayload | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  const callerId = typeof r.callerId === 'string' ? r.callerId : ''
+  const targetId = typeof r.targetId === 'string' ? r.targetId : ''
+  const pileReceiver = typeof r.pileReceiver === 'string' ? r.pileReceiver : ''
+  const bluffCaught = Boolean(r.bluffCaught)
+  const claimedRank = typeof r.claimedRank === 'string' ? r.claimedRank : ''
+  const claimedCount = typeof r.claimedCount === 'number' ? r.claimedCount : 0
+  const rawCards = Array.isArray(r.lastPlayedCards) ? r.lastPlayedCards : []
+  const lastPlayedCards: GameCard[] = rawCards
+    .map((c) => {
+      if (!c || typeof c !== 'object') return null
+      const cr = c as Record<string, unknown>
+      const id = typeof cr.id === 'string' ? cr.id : ''
+      const rank = typeof cr.rank === 'string' ? cr.rank : ''
+      const suit = typeof cr.suit === 'string' ? cr.suit : ''
+      if (!id || !rank || !suit) return null
+      return { id, rank, suit }
+    })
+    .filter((c): c is GameCard => c !== null)
+  if (!callerId) return null
+  const callerNameRaw = r.callerName
+  const targetNameRaw = r.targetName
+  return {
+    callerId,
+    targetId,
+    callerName: typeof callerNameRaw === 'string' && callerNameRaw.trim() !== '' ? callerNameRaw.trim() : undefined,
+    callerCharacterIndex: intFromJson(r.callerCharacterIndex),
+    targetName: typeof targetNameRaw === 'string' && targetNameRaw.trim() !== '' ? targetNameRaw.trim() : undefined,
+    targetCharacterIndex: intFromJson(r.targetCharacterIndex),
+    bluffCaught,
+    pileReceiver,
+    lastPlayedCards,
+    claimedRank,
+    claimedCount,
+  }
+}
+
 export function Room({ roomSession }: RoomProps) {
   const { socket } = useAppSocket()
   const dispatch = useAppDispatch()
@@ -59,6 +129,13 @@ export function Room({ roomSession }: RoomProps) {
     finishedPlayers: string[]
     playerNames?: Record<string, string>
   } | null>(null)
+  const [openCallReveal, setOpenCallReveal] = useState<OpenReveal | null>(null)
+  const [gameActionToast, setGameActionToast] = useState<{
+    id: number
+    socketId: string
+    text: string
+  } | null>(null)
+  const gameToastIdRef = useRef(0)
   const match = useMatch('/:roomId')
   const roomId = match?.params.roomId
   const shareUrl = `${window.location.origin}/${roomState.id}`
@@ -95,6 +172,15 @@ export function Room({ roomSession }: RoomProps) {
     [roomState.users],
   )
 
+  const nameBySocketIdRef = useRef(nameBySocketId)
+  const roomUsersRef = useRef(roomState.users)
+  useEffect(() => {
+    nameBySocketIdRef.current = nameBySocketId
+  }, [nameBySocketId])
+  useEffect(() => {
+    roomUsersRef.current = roomState.users
+  }, [roomState.users])
+
   const lastBettorId = turnUpdate?.lastBetPlayerId ?? ''
   const lastBettorName = lastBettorId ? nameBySocketId[lastBettorId] ?? '' : ''
   const lastBettorUser = useMemo(
@@ -119,6 +205,32 @@ export function Room({ roomSession }: RoomProps) {
   )
   const pileCount = turnUpdate?.pileCount ?? 0
   const pileVisualCount = pileCount === 0 ? 1 : Math.min(8, Math.max(1, pileCount))
+
+  const lastKnownPileCountRef = useRef(0)
+  const [pileFlushExit, setPileFlushExit] = useState<{ from: number } | null>(null)
+  useLayoutEffect(() => {
+    lastKnownPileCountRef.current = pileCount
+  }, [pileCount])
+
+  const handlePileFlushAnimEnd = (e: AnimationEvent<HTMLDivElement>) => {
+    if (e.animationName !== PILE_STACK_FLUSH_RIGHT_NAME) {
+      return
+    }
+    setPileFlushExit(null)
+  }
+
+  // If animation is skipped (e.g. some browsers with reduced motion), still clear the flush layer.
+  useEffect(() => {
+    if (!pileFlushExit) return
+    const t = window.setTimeout(() => setPileFlushExit(null), 700)
+    return () => window.clearTimeout(t)
+  }, [pileFlushExit])
+
+  useEffect(() => {
+    if (isInRound) return
+    setPileFlushExit(null)
+    lastKnownPileCountRef.current = 0
+  }, [isInRound])
 
   useEffect(() => {
     if (!socket) {
@@ -148,10 +260,55 @@ export function Room({ roomSession }: RoomProps) {
       setGameStatus('in_round')
       setGameEndSummary(null)
     })
-    socket.on('turn_update', (payload: TurnUpdatePayload) => {
+    const onTurnUpdate = (payload: TurnUpdatePayload) => {
+      setOpenCallReveal(null)
+      if (payload.pileCount > 0) {
+        setPileFlushExit(null)
+      }
       setTurnUpdate(payload)
       setGameStatus(payload.status || 'in_round')
-    })
+    }
+    socket.on('turn_update', onTurnUpdate)
+    const onRoundReset = (raw: unknown) => {
+      if (!raw || typeof raw !== 'object') return
+      const reason = (raw as { reason?: string }).reason
+      if (reason !== 'pass_flush') return
+      const n = lastKnownPileCountRef.current
+      if (n > 0) {
+        setPileFlushExit({ from: n })
+      }
+    }
+    socket.on('round_reset', onRoundReset)
+    const onPlayerMove = (raw: unknown) => {
+      if (!raw || typeof raw !== 'object') return
+      const p = raw as { playerId?: string; count?: number; rank?: string }
+      const id = p.playerId
+      if (typeof id !== 'string' || !id) return
+      const count = typeof p.count === 'number' && Number.isFinite(p.count) ? p.count : 0
+      const rank = typeof p.rank === 'string' && p.rank ? p.rank : '?'
+      const text = `Bluff ${count} ${rank}`.trim()
+      gameToastIdRef.current += 1
+      setGameActionToast({ id: gameToastIdRef.current, socketId: id, text })
+    }
+    const onPlayerPass = (raw: unknown) => {
+      if (!raw || typeof raw !== 'object') return
+      const p = raw as { playerId?: string }
+      const id = p.playerId
+      if (typeof id !== 'string' || !id) return
+      gameToastIdRef.current += 1
+      setGameActionToast({ id: gameToastIdRef.current, socketId: id, text: 'Pass' })
+    }
+    const onBluffCalled = (raw: unknown) => {
+      if (!raw || typeof raw !== 'object') return
+      const p = raw as { callerId?: string }
+      const id = p.callerId
+      if (typeof id !== 'string' || !id) return
+      gameToastIdRef.current += 1
+      setGameActionToast({ id: gameToastIdRef.current, socketId: id, text: 'Call' })
+    }
+    socket.on('player_move', onPlayerMove)
+    socket.on('player_pass', onPlayerPass)
+    socket.on('bluff_called', onBluffCalled)
     socket.on('timer_tick', (payload: { playerId?: string; secondsLeft?: number }) => {
       setTurnUpdate((prev) => {
         if (!prev) return prev
@@ -162,9 +319,41 @@ export function Room({ roomSession }: RoomProps) {
         }
       })
     })
+    const onBluffResult = (raw: unknown) => {
+      const payload = parseBluffResultPayload(raw)
+      if (!payload) return
+      const callerUser = roomUsersRef.current.find((u) => u.socketId === payload.callerId)
+      const targetUser = roomUsersRef.current.find((u) => u.socketId === payload.targetId)
+      const callerName =
+        payload.callerName ?? nameBySocketIdRef.current[payload.callerId] ?? callerUser?.name ?? 'Player'
+      const targetName =
+        payload.targetName ?? nameBySocketIdRef.current[payload.targetId] ?? targetUser?.name ?? 'Player'
+      const callerCharacterIndex =
+        payload.callerCharacterIndex !== undefined
+          ? payload.callerCharacterIndex
+          : (callerUser?.characterIndex ?? 0)
+      const targetCharacterIndex =
+        payload.targetCharacterIndex !== undefined
+          ? payload.targetCharacterIndex
+          : (targetUser?.characterIndex ?? 0)
+      setOpenCallReveal({
+        callerId: payload.callerId,
+        callerName,
+        callerCharacterIndex,
+        targetId: payload.targetId,
+        targetName,
+        targetCharacterIndex,
+        wasRight: payload.bluffCaught,
+        cards: payload.lastPlayedCards,
+        claimedRank: payload.claimedRank,
+        claimedCount: payload.claimedCount,
+      })
+    }
+    socket.on('bluff_result', onBluffResult)
     socket.on(
       'game_end',
       (payload: { finishedPlayers?: string[]; playerNames?: Record<string, string> }) => {
+        setOpenCallReveal(null)
         setGameStatus('game_end')
         setGameEndSummary({
           finishedPlayers: payload.finishedPlayers ?? [],
@@ -178,8 +367,13 @@ export function Room({ roomSession }: RoomProps) {
       socket.off('room:message', onRoomMessage)
       socket.off('setup_start')
       socket.off('game_start')
-      socket.off('turn_update')
+      socket.off('turn_update', onTurnUpdate)
+      socket.off('round_reset', onRoundReset)
+      socket.off('player_move', onPlayerMove)
+      socket.off('player_pass', onPlayerPass)
+      socket.off('bluff_called', onBluffCalled)
       socket.off('timer_tick')
+      socket.off('bluff_result', onBluffResult)
       socket.off('game_end')
     }
   }, [socket, roomId, roomState.id])
@@ -250,6 +444,17 @@ export function Room({ roomSession }: RoomProps) {
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
+  // Safety net: if the deferred turn_update never reaches the client (e.g. dropped
+  // socket event), clear the reveal modal after OPEN_REVEAL_SAFETY_MS so the UI
+  // does not get stuck.
+  useEffect(() => {
+    if (!openCallReveal) return
+    const timer = window.setTimeout(() => {
+      setOpenCallReveal(null)
+    }, OPEN_REVEAL_SAFETY_MS)
+    return () => window.clearTimeout(timer)
+  }, [openCallReveal])
+
   const hand = turnUpdate?.yourHand ?? []
 
   return (
@@ -257,6 +462,7 @@ export function Room({ roomSession }: RoomProps) {
       <Lobby
         room={roomState}
         lastMessage={lastMessage}
+        gameActionToast={gameActionToast}
         currentTurnPlayerId={turnUpdate?.currentPlayerId ?? ''}
         turnSecondsLeft={turnUpdate?.secondsLeft}
         gameEnded={isGameEnd}
@@ -312,37 +518,68 @@ export function Room({ roomSession }: RoomProps) {
               </Box>
             ) : null}
 
-            <Box className="pile-stack" aria-label={`Pile of ${pileCount} cards`}>
-              {pileCount === 0 ? (
-                <img
-                  src={backMaroon}
-                  alt=""
-                  className="pile-stack__card pile-stack__card--placeholder"
-                  draggable={false}
-                />
-              ) : (
-                Array.from({ length: pileVisualCount }).map((_, i) => {
-                  const rot = PILE_ROTATIONS[i % PILE_ROTATIONS.length]
-                  const [dx, dy] = PILE_OFFSETS[i % PILE_OFFSETS.length]
-                  return (
-                    <img
-                      key={i}
-                      src={backMaroon}
-                      alt=""
-                      className="pile-stack__card"
-                      draggable={false}
-                      style={{
-                        transform: `translate(${dx}px, ${dy}px) rotate(${rot}deg)`,
-                        zIndex: i,
-                      }}
-                    />
-                  )
-                })
-              )}
-              <Box className="pile-count-badge" aria-label={`${pileCount} cards in pile`}>
-                {pileCount}
+            {pileFlushExit ? (
+              <Box
+                className="pile-stack pile-stack--flush-exit"
+                onAnimationEnd={handlePileFlushAnimEnd}
+                aria-label={`Pile of ${pileFlushExit.from} cards, clearing off table`}
+              >
+                {Array.from({ length: Math.min(8, Math.max(1, pileFlushExit.from)) }).map(
+                  (_, i) => {
+                    const rot = PILE_ROTATIONS[i % PILE_ROTATIONS.length]
+                    const [dx, dy] = PILE_OFFSETS[i % PILE_OFFSETS.length]
+                    return (
+                      <img
+                        key={i}
+                        src={backMaroon}
+                        alt=""
+                        className="pile-stack__card"
+                        draggable={false}
+                        style={{
+                          transform: `translate(${dx}px, ${dy}px) rotate(${rot}deg)`,
+                          zIndex: i,
+                        }}
+                      />
+                    )
+                  },
+                )}
+                <Box className="pile-count-badge" aria-label={`${pileFlushExit.from} cards in pile`}>
+                  {pileFlushExit.from}
+                </Box>
               </Box>
-            </Box>
+            ) : (
+              <Box className="pile-stack" aria-label={`Pile of ${pileCount} cards`}>
+                {pileCount === 0 ? (
+                  <img
+                    src={backMaroon}
+                    alt=""
+                    className="pile-stack__card pile-stack__card--placeholder"
+                    draggable={false}
+                  />
+                ) : (
+                  Array.from({ length: pileVisualCount }).map((_, i) => {
+                    const rot = PILE_ROTATIONS[i % PILE_ROTATIONS.length]
+                    const [dx, dy] = PILE_OFFSETS[i % PILE_OFFSETS.length]
+                    return (
+                      <img
+                        key={i}
+                        src={backMaroon}
+                        alt=""
+                        className="pile-stack__card"
+                        draggable={false}
+                        style={{
+                          transform: `translate(${dx}px, ${dy}px) rotate(${rot}deg)`,
+                          zIndex: i,
+                        }}
+                      />
+                    )
+                  })
+                )}
+                <Box className="pile-count-badge" aria-label={`${pileCount} cards in pile`}>
+                  {pileCount}
+                </Box>
+              </Box>
+            )}
 
             {hasLastBetUi && currentBet ? (
               <Box
@@ -434,6 +671,12 @@ export function Room({ roomSession }: RoomProps) {
           )}
         </Box>
       </Dialog>
+
+      <OpenRevealModal
+        reveal={openCallReveal}
+        themeId={handThemeId}
+        cardThemeId={theme1.pokerFelt.green.cardFolder}
+      />
 
       <IconButton
         className="room-comment-fab"

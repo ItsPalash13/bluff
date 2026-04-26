@@ -7,6 +7,7 @@ import { theme1 } from '../../theme/theme1'
 export function Lobby({
   room,
   lastMessage,
+  gameActionToast = null,
   currentTurnPlayerId,
   turnSecondsLeft,
   gameEnded = false,
@@ -15,8 +16,10 @@ export function Lobby({
   const themeId = theme1.pokerFelt.green.characterFolder
   const totalCharacters = getCharacterCount(themeId)
   const [messageBubbles, setMessageBubbles] = useState({})
+  const [actionBubbles, setActionBubbles] = useState({})
 
   const bubbleTimeoutMs = 1000
+  const actionBubbleTimeoutMs = 1000
   const maxBubbleChars = 50
 
   useEffect(() => {
@@ -37,6 +40,21 @@ export function Lobby({
     return () => clearTimeout(timeout)
   }, [lastMessage])
 
+  useEffect(() => {
+    if (!gameActionToast?.socketId || !gameActionToast.text) return
+    const { socketId, text } = gameActionToast
+    const normalized = String(text).trim().slice(0, maxBubbleChars) || '—'
+    setActionBubbles((prev) => ({ ...prev, [socketId]: normalized }))
+    const timeout = setTimeout(() => {
+      setActionBubbles((prev) => {
+        const next = { ...prev }
+        delete next[socketId]
+        return next
+      })
+    }, actionBubbleTimeoutMs)
+    return () => clearTimeout(timeout)
+  }, [gameActionToast])
+
   return (
     <Box className="lobby-layout">
       <Box className="lobby-top">
@@ -44,7 +62,10 @@ export function Lobby({
           const avatarUrl = getCharacterImageUrlByIndex(themeId, Math.min(user.characterIndex, totalCharacters - 1))
           const isHost = user.socketId === room.hostSocketId
           const isCurrentTurn = Boolean(!gameEnded && currentTurnPlayerId && user.socketId === currentTurnPlayerId)
-          const bubbleMessage = messageBubbles[user.socketId]
+          const actionMessage = actionBubbles[user.socketId]
+          const chatMessage = messageBubbles[user.socketId]
+          const bubbleMessage = actionMessage || chatMessage
+          const bubbleIsAction = Boolean(actionMessage)
           const hasTurnTimer = (room.turnSeconds ?? 0) > 0
           const totalTurnSeconds = Math.max(1, room.turnSeconds || 1)
           const currentSeconds =
@@ -63,8 +84,22 @@ export function Lobby({
             <Box key={user.socketId} className="lobby-seat">
               <Box sx={{ position: 'relative' }}>
                 {bubbleMessage ? (
-                  <Box className="lobby-seat__message-tooltip" role="status" aria-live="polite">
-                    <Typography className="lobby-seat__message">{bubbleMessage}</Typography>
+                  <Box
+                    className={
+                      bubbleIsAction
+                        ? 'lobby-seat__message-tooltip lobby-seat__message-tooltip--action'
+                        : 'lobby-seat__message-tooltip'
+                    }
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <Typography
+                      className={
+                        bubbleIsAction ? 'lobby-seat__message lobby-seat__message--action' : 'lobby-seat__message'
+                      }
+                    >
+                      {bubbleMessage}
+                    </Typography>
                   </Box>
                 ) : null}
                 <Avatar

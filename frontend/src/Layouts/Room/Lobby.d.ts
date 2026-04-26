@@ -26,6 +26,8 @@ type LobbyMessage = {
 export const Lobby: ComponentType<{
   room: LobbyRoomState
   lastMessage: LobbyMessage | null
+  /** Fires avatar tooltip for in-game actions (play / pass / call). */
+  gameActionToast?: { id: number; socketId: string; text: string } | null
   currentTurnPlayerId?: string
   turnSecondsLeft?: number
   gameEnded?: boolean

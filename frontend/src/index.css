@@ -61,10 +61,13 @@
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
+  overflow-x: hidden;
 }
 
 body {
   margin: 0;
+  /* Keep pile flush and other off-screen transforms from widening the page / showing a horiz. scrollbar */
+  overflow-x: hidden;
 }
 
 h1,

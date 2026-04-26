@@ -38,6 +38,22 @@ export type GameBet = {
   playerId: string
 }
 
+export type BluffResultPayload = {
+  callerId: string
+  targetId: string
+  /** Display name for the player who called Open (server-authoritative when present). */
+  callerName?: string
+  callerCharacterIndex?: number
+  /** Display name for the last bettor (server-authoritative when present). */
+  targetName?: string
+  targetCharacterIndex?: number
+  bluffCaught: boolean
+  pileReceiver: string
+  lastPlayedCards: GameCard[]
+  claimedRank: string
+  claimedCount: number
+}
+
 export type TurnUpdatePayload = {
   roomId: string
   status: string
