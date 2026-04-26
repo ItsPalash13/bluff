@@ -14,6 +14,25 @@ function createPokerMuiTheme(felt: Theme1Felt): Theme {
       },
     },
     components: {
+      MuiAvatar: {
+        styleOverrides: {
+          root: {
+            boxSizing: 'border-box',
+            overflow: 'hidden',
+          },
+          /**
+           * Cover + slight zoom removes the 1px “crescent” gaps at the circle
+           * edge (subpixel + border-radius clipping) that show the dark slot bg.
+           */
+          img: {
+            objectFit: 'cover',
+            objectPosition: 'center',
+            display: 'block',
+            transform: 'scale(1.06)',
+            transformOrigin: 'center',
+          },
+        },
+      },
       MuiCssBaseline: {
         styleOverrides: {
           /**
