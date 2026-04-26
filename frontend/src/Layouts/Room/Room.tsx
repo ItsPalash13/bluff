@@ -378,7 +378,7 @@ export function Room({ roomSession }: RoomProps) {
     }
   }, [socket, roomId, roomState.id])
 
-  const handleSettingsChange = (p: { turnSeconds: number; capacity: number; totalCards: number }) => {
+  const handleSettingsChange = (p: { turnSeconds: number; totalCards: number }) => {
     if (!socket) return
     socket.emit('room:updateSettings', p)
   }
@@ -476,7 +476,6 @@ export function Room({ roomSession }: RoomProps) {
             roomStatus={roomStatus}
             turnSeconds={roomState.turnSeconds ?? 0}
             totalCards={roomState.totalCards ?? 26}
-            capacity={roomState.capacity ?? 2}
             onSettingsChange={handleSettingsChange}
             onStart={handleStart}
             onShare={handleCopyLink}

@@ -12,10 +12,9 @@ import (
 )
 
 const (
-	roomCodeLength     = 6
-	minRoomCapacity    = 2
-	maxRoomCapacity    = 4
-	defaultRoomCapacity = 2
+	roomCodeLength    = 6
+	minRoomCapacity   = 2 // min players to start a game (see game_runtime)
+	fixedRoomCapacity = 6 // lobby join slots; not configurable
 	roomStatusWaiting  = "waiting"
 	roomStatusStarted  = "started"
 )
@@ -53,7 +52,6 @@ type roomMessagePayload struct {
 
 type roomSettingsPayload struct {
 	TurnSeconds int `json:"turnSeconds"`
-	Capacity    int `json:"capacity"`
 	TotalCards  int `json:"totalCards"`
 }
 
@@ -185,8 +183,8 @@ func newSocketServer() *server.Server {
 
 		socket.On("room:updateSettings", func(args ...any) {
 			payload := parseRoomSettingsPayload(args)
-			fmt.Printf("[socket] room:updateSettings from=%s turnSeconds=%d capacity=%d totalCards=%d\n",
-				socketID, payload.TurnSeconds, payload.Capacity, payload.TotalCards)
+			fmt.Printf("[socket] room:updateSettings from=%s turnSeconds=%d totalCards=%d\n",
+				socketID, payload.TurnSeconds, payload.TotalCards)
 			state, errCode, errMsg := store.updateRoomSettings(socketID, payload)
 			if errCode != "" {
 				fmt.Printf("[socket] room:updateSettings rejected socket=%s code=%s message=%q\n", socketID, errCode, errMsg)
@@ -328,7 +326,6 @@ func parseRoomSettingsPayload(args []any) roomSettingsPayload {
 
 	payload := roomSettingsPayload{}
 	payload.TurnSeconds = intFromJSON(raw["turnSeconds"])
-	payload.Capacity = intFromJSON(raw["capacity"])
 	payload.TotalCards = intFromJSON(raw["totalCards"])
 	return payload
 }
@@ -387,7 +384,7 @@ func (s *roomStore) createRoom(socketID, name string, characterIndex int) *RoomS
 	state := &RoomState{
 		ID:           roomID,
 		HostSocketID: socketID,
-		Capacity:     defaultRoomCapacity,
+		Capacity:     fixedRoomCapacity,
 		Status:       roomStatusWaiting,
 		TurnSeconds:  0,
 		TotalCards:   26,
@@ -426,12 +423,6 @@ func (s *roomStore) updateRoomSettings(socketID string, p roomSettingsPayload) (
 		return nil, "INVALID_ROOM_STATUS", "Settings can only be changed while the room is waiting."
 	}
 
-	if p.Capacity < minRoomCapacity || p.Capacity > maxRoomCapacity {
-		return nil, "INVALID_SETTINGS", "Player count must be between 2 and 4."
-	}
-	if p.Capacity < len(state.Users) {
-		return nil, "INVALID_SETTINGS", "Player count cannot be less than the number of players in the room."
-	}
 	if !isAllowedTurnSeconds(p.TurnSeconds) {
 		return nil, "INVALID_SETTINGS", "Invalid turn time."
 	}
@@ -442,7 +433,7 @@ func (s *roomStore) updateRoomSettings(socketID string, p roomSettingsPayload) (
 	}
 
 	state.TurnSeconds = p.TurnSeconds
-	state.Capacity = p.Capacity
+	state.Capacity = fixedRoomCapacity
 	state.TotalCards = totalCards
 	return cloneRoomState(state), "", ""
 }

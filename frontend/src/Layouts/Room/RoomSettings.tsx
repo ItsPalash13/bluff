@@ -7,8 +7,7 @@ type RoomSettingsProps = {
   roomStatus: string
   turnSeconds: number
   totalCards: number
-  capacity: number
-  onSettingsChange: (p: { turnSeconds: number; capacity: number; totalCards: number }) => void
+  onSettingsChange: (p: { turnSeconds: number; totalCards: number }) => void
   onStart: (p: { turnSeconds: number; totalCards: number }) => void
   onShare: () => void
 }
@@ -25,7 +24,6 @@ export function RoomSettings({
   roomStatus,
   turnSeconds: turnSecondsProp,
   totalCards: totalCardsProp,
-  capacity: capacityProp,
   onSettingsChange,
   onStart,
   onShare,
@@ -44,7 +42,7 @@ export function RoomSettings({
     setTotalCards(totalCardsProp)
   }, [totalCardsProp])
 
-  const pushUpdate = (next: { turnSeconds: number; capacity: number; totalCards: number }) => {
+  const pushUpdate = (next: { turnSeconds: number; totalCards: number }) => {
     if (disabled) return
     onSettingsChange(next)
   }
@@ -52,13 +50,13 @@ export function RoomSettings({
   const handleTurnChange = (e: SelectChangeEvent<number>) => {
     const v = Number(e.target.value)
     setTurnSeconds(v)
-    pushUpdate({ turnSeconds: v, capacity: capacityProp, totalCards })
+    pushUpdate({ turnSeconds: v, totalCards })
   }
 
   const handleTotalCardsChange = (e: SelectChangeEvent<number>) => {
     const v = Number(e.target.value)
     setTotalCards(v)
-    pushUpdate({ turnSeconds, capacity: capacityProp, totalCards: v })
+    pushUpdate({ turnSeconds, totalCards: v })
   }
 
   return (
