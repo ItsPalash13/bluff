@@ -1288,6 +1288,21 @@
   width: auto;
 }
 
+@media (max-width: 700px) {
+  .app-logo-tab-wrap {
+    left: 8px;
+  }
+
+  .app-logo-tab {
+    padding: 4px 8px 0;
+    border-radius: 10px 10px 0 0;
+  }
+
+  .app-logo-tab__img {
+    height: 56px;
+  }
+}
+
 /* Game-end "Play Again" panel rendered below the leaderboard */
 .game-end-restart {
   display: flex;
