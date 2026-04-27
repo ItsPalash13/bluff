@@ -23,6 +23,8 @@ export function CreateNJoin({ connecting, onJoined }: CreateNJoinProps) {
   const [themeId] = useState(theme1.pokerFelt.green.characterFolder)
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [isPending, setIsPending] = useState(false)
+  const [connectHint, setConnectHint] = useState<'idle' | 'trying' | 'slow'>('idle')
+  const [loadingDots, setLoadingDots] = useState('.')
   const [error, setError] = useState('')
 
   const selectedImage = useMemo(
@@ -31,6 +33,44 @@ export function CreateNJoin({ connecting, onJoined }: CreateNJoinProps) {
   )
 
   const isJoinMode = Boolean(roomIdFromPath)
+
+  useEffect(() => {
+    if (!isPending) {
+      setConnectHint('idle')
+      return
+    }
+
+    const tryingTimer = window.setTimeout(() => {
+      setConnectHint('trying')
+    }, 1000)
+
+    const slowTimer = window.setTimeout(() => {
+      setConnectHint('slow')
+    }, 5000)
+
+    return () => {
+      window.clearTimeout(tryingTimer)
+      window.clearTimeout(slowTimer)
+    }
+  }, [isPending])
+
+  useEffect(() => {
+    if (!isPending) {
+      setLoadingDots('.')
+      return
+    }
+
+    const frames = ['.', '..', '...']
+    let frameIndex = 0
+    const dotsTimer = window.setInterval(() => {
+      frameIndex = (frameIndex + 1) % frames.length
+      setLoadingDots(frames[frameIndex])
+    }, 700)
+
+    return () => {
+      window.clearInterval(dotsTimer)
+    }
+  }, [isPending])
 
   useEffect(() => {
     if (!socket || connecting) {
@@ -197,6 +237,16 @@ export function CreateNJoin({ connecting, onJoined }: CreateNJoinProps) {
             {isJoinMode ? 'Join room' : 'Create new room'}
           </Button>
         </Stack>
+        {connectHint === 'trying' ? (
+          <Typography sx={{ color: '#e5e7eb' }}>
+            {`Trying to connect to server${loadingDots}`}
+          </Typography>
+        ) : null}
+        {connectHint === 'slow' ? (
+          <Typography sx={{ color: '#facc15', fontWeight: 600 }}>
+            {`Taking longer than usual${loadingDots}`}
+          </Typography>
+        ) : null}
       </Paper>
     </Box>
   )
