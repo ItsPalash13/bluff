@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Avatar, Box, Button, Paper, Stack, TextField, Typography } from '@mui/material'
+import { Alert, Avatar, Box, Button, Dialog, Paper, Stack, TextField, Typography } from '@mui/material'
 import { useParams } from 'react-router-dom'
 import { CharacterCardSelector } from '../../assets/characters/CharacterCardSelector'
 import { getCharacterImageUrlByIndex } from '../../assets/characters/characterImageSources'
@@ -26,13 +26,30 @@ export function CreateNJoin({ connecting, onJoined }: CreateNJoinProps) {
   const [connectHint, setConnectHint] = useState<'idle' | 'trying' | 'slow'>('idle')
   const [loadingDots, setLoadingDots] = useState('.')
   const [error, setError] = useState('')
+  const [roomCode, setRoomCode] = useState('')
+  const [mobileNoticeOpen, setMobileNoticeOpen] = useState(false)
 
   const selectedImage = useMemo(
     () => getCharacterImageUrlByIndex(themeId, selectedIndex),
     [themeId, selectedIndex],
   )
 
-  const isJoinMode = Boolean(roomIdFromPath)
+  const isMobileClient = useMemo(() => {
+    if (typeof navigator === 'undefined' || typeof window === 'undefined') return false
+    const ua = navigator.userAgent || ''
+    const isMobileUa = /Android|iPhone|iPad|iPod|Mobile|Windows Phone/i.test(ua)
+    const isSmallViewport = window.innerWidth <= 500
+    return isMobileUa || isSmallViewport
+  }, [])
+
+  const isJoinMode = Boolean(roomIdFromPath) || isMobileClient
+  const joinRoomCode = (roomIdFromPath ?? roomCode).trim().toUpperCase()
+
+  useEffect(() => {
+    if (isMobileClient) {
+      setMobileNoticeOpen(true)
+    }
+  }, [isMobileClient])
 
   useEffect(() => {
     if (!isPending) {
@@ -130,19 +147,19 @@ export function CreateNJoin({ connecting, onJoined }: CreateNJoinProps) {
       setError('Please enter your name before joining a room.')
       return
     }
-    if (!roomIdFromPath) {
-      setError('Room id is missing from URL.')
+    if (!joinRoomCode) {
+      setError('Please enter a room code.')
       return
     }
     setIsPending(true)
     setError('')
     console.debug('[socket][room] emit room:join', {
-      roomId: roomIdFromPath.toUpperCase(),
+      roomId: joinRoomCode,
       name: name.trim(),
       characterIndex: selectedIndex,
     })
     ensureConnected().emit('room:join', {
-      roomId: roomIdFromPath.toUpperCase(),
+      roomId: joinRoomCode,
       name: name.trim(),
       characterIndex: selectedIndex,
     })
@@ -209,6 +226,27 @@ export function CreateNJoin({ connecting, onJoined }: CreateNJoinProps) {
         />
 
         <Box sx={{ width: 'min(420px, 100%)' }}>
+          {isMobileClient && !roomIdFromPath ? (
+            <>
+              <Typography sx={{ color: '#e5e7eb', fontWeight: 600, mb: 0.75 }}>Room code</Typography>
+              <TextField
+                fullWidth
+                value={roomCode}
+                onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
+                placeholder="Enter room code"
+                variant="outlined"
+                size="small"
+                sx={{
+                  mb: 1.2,
+                  '& .MuiInputBase-root': {
+                    color: '#f8fafc',
+                    background: 'rgba(0, 0, 0, 0.35)',
+                    borderRadius: '10px',
+                  },
+                }}
+              />
+            </>
+          ) : null}
           <Typography sx={{ color: '#e5e7eb', fontWeight: 600, mb: 0.75 }}>Name</Typography>
           <TextField
             fullWidth
@@ -248,6 +286,25 @@ export function CreateNJoin({ connecting, onJoined }: CreateNJoinProps) {
           </Typography>
         ) : null}
       </Paper>
+      <Dialog
+        open={mobileNoticeOpen}
+        onClose={() => setMobileNoticeOpen(false)}
+        classes={{ paper: 'rank-modal profile-edit-modal' }}
+        slotProps={{ backdrop: { className: 'rank-modal__backdrop' } }}
+      >
+        <Typography className="rank-modal__title">MOBILE NOTICE</Typography>
+        <Typography sx={{ color: '#f8fafc', textAlign: 'center', mb: 1.5, maxWidth: 460 }}>
+          Hi Mobile User! You can join and play existing rooms, but creating a new room isn’t available right now.
+          <br />
+          <br />
+          For the full experience, please use a laptop or desktop.
+        </Typography>
+        <Box sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}>
+          <Button variant="contained" color="success" onClick={() => setMobileNoticeOpen(false)}>
+            Continue to Join
+          </Button>
+        </Box>
+      </Dialog>
     </Box>
   )
 }
