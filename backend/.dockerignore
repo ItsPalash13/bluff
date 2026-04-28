@@ -1,0 +1,7 @@
+.git
+.gitignore
+*.md
+*.mmd
+*.log
+tmp
+bin
