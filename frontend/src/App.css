@@ -1097,6 +1097,29 @@
   flex: 0 0 auto;
 }
 
+@media (max-width: 520px) {
+  .open-reveal-modal__versus {
+    flex-wrap: nowrap;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .open-reveal-modal__player {
+    flex: 1 1 0;
+    max-width: none;
+    min-width: 0;
+  }
+
+  .open-reveal-modal__vs {
+    font-size: 1rem !important;
+    padding: 0 2px;
+  }
+
+  .open-reveal-modal__name {
+    font-size: 0.86rem !important;
+  }
+}
+
 .open-reveal-modal__avatar {
   width: 56px !important;
   height: 56px !important;
