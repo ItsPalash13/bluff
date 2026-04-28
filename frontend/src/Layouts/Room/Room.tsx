@@ -13,6 +13,7 @@ import {
   Dialog,
   IconButton,
   Paper,
+  TextField,
   Typography,
 } from '@mui/material'
 import ChatIcon from '@mui/icons-material/Chat'
@@ -24,6 +25,7 @@ import { useAppSocket } from '../../state/SocketProvider'
 import { useAppDispatch, useAppSelector } from '../../store/hooks'
 import { setCommentOpen } from '../../store/uiSlice'
 import { getCharacterCount, getCharacterImageUrlByIndex } from '../../assets/characters/characterImageSources'
+import { CharacterCardSelector } from '../../assets/characters/CharacterCardSelector'
 import { theme1 } from '../../theme/theme1'
 import backMaroon from '../../assets/card/png/2x/back-maroon.png'
 import type {
@@ -136,6 +138,10 @@ export function Room({ roomSession }: RoomProps) {
     text: string
   } | null>(null)
   const gameToastIdRef = useRef(0)
+  const [profileEditOpen, setProfileEditOpen] = useState(false)
+  const [profileEditName, setProfileEditName] = useState('')
+  const [profileEditCharacterIndex, setProfileEditCharacterIndex] = useState(0)
+  const [profileEditError, setProfileEditError] = useState('')
   const match = useMatch('/:roomId')
   const roomId = match?.params.roomId
   const shareUrl = `${window.location.origin}/${roomState.id}`
@@ -143,6 +149,10 @@ export function Room({ roomSession }: RoomProps) {
   const roomStatus = gameStatus || roomState.status || 'waiting'
   const canEdit = isHost && roomStatus === 'waiting'
   const mySocketId = socket?.id ?? ''
+  const myUser = useMemo(
+    () => roomState.users.find((user) => user.socketId === mySocketId),
+    [roomState.users, mySocketId],
+  )
   const rankOptions = useMemo(() => {
     const hand = turnUpdate?.yourHand ?? []
     const uniqueRanks = new Set(hand.map((card) => card.rank))
@@ -188,6 +198,15 @@ export function Room({ roomSession }: RoomProps) {
     [lastBettorId, roomState.users],
   )
   const handThemeId = theme1.pokerFelt.green.characterFolder
+  const handThemeCharacterCount = getCharacterCount(handThemeId)
+  const profileEditPreviewUrl = useMemo(
+    () =>
+      getCharacterImageUrlByIndex(
+        handThemeId,
+        Math.min(Math.max(0, profileEditCharacterIndex), Math.max(0, handThemeCharacterCount - 1)),
+      ),
+    [handThemeId, handThemeCharacterCount, profileEditCharacterIndex],
+  )
   const lastBettorAvatarUrl = useMemo(() => {
     if (!lastBettorUser) return ''
     const n = getCharacterCount(handThemeId)
@@ -442,6 +461,33 @@ export function Room({ roomSession }: RoomProps) {
     }
   }
 
+  const handleOpenProfileEdit = () => {
+    if (!myUser || roomStatus !== 'waiting') return
+    setProfileEditName(myUser.name)
+    setProfileEditCharacterIndex(myUser.characterIndex)
+    setProfileEditError('')
+    setProfileEditOpen(true)
+  }
+
+  const handleCloseProfileEdit = () => {
+    setProfileEditOpen(false)
+    setProfileEditError('')
+  }
+
+  const handleSaveProfileEdit = () => {
+    if (!socket || roomStatus !== 'waiting') return
+    const trimmedName = profileEditName.trim()
+    if (!trimmedName) {
+      setProfileEditError('Name is required.')
+      return
+    }
+    socket.emit('room:updateProfile', {
+      name: trimmedName,
+      characterIndex: profileEditCharacterIndex,
+    })
+    setProfileEditOpen(false)
+  }
+
   useEffect(() => {
     const onResize = () => setViewportWidth(window.innerWidth)
     window.addEventListener('resize', onResize, { passive: true })
@@ -486,6 +532,9 @@ export function Room({ roomSession }: RoomProps) {
         turnSecondsLeft={turnUpdate?.secondsLeft}
         gameEnded={isGameEnd}
         playerCardCounts={turnUpdate?.playerCardCounts}
+        canEditProfile={roomStatus === 'waiting'}
+        mySocketId={mySocketId}
+        onEditProfile={handleOpenProfileEdit}
       />
 
       {roomStatus === 'waiting' ? (
@@ -714,6 +763,61 @@ export function Room({ roomSession }: RoomProps) {
         themeId={handThemeId}
         cardThemeId={theme1.pokerFelt.green.cardFolder}
       />
+
+      <Dialog
+        open={profileEditOpen}
+        onClose={handleCloseProfileEdit}
+        classes={{ paper: 'rank-modal profile-edit-modal' }}
+        slotProps={{ backdrop: { className: 'rank-modal__backdrop' } }}
+      >
+        <Typography className="rank-modal__title">EDIT PROFILE</Typography>
+        <CharacterCardSelector
+          themeId={handThemeId}
+          selectedIndex={profileEditCharacterIndex}
+          onSelect={(idx) => {
+            setProfileEditCharacterIndex(idx)
+            if (profileEditError) setProfileEditError('')
+          }}
+        />
+        <Box sx={{ mt: 1, display: 'grid', placeItems: 'center' }}>
+          <Avatar
+            src={profileEditPreviewUrl}
+            alt="Selected character"
+            sx={{ width: 92, height: 92, border: '2px solid rgba(255,255,255,0.25)' }}
+          />
+        </Box>
+        <Box sx={{ mt: 1.5 }}>
+          <TextField
+            fullWidth
+            value={profileEditName}
+            onChange={(e) => {
+              setProfileEditName(e.target.value)
+              if (profileEditError) setProfileEditError('')
+            }}
+            placeholder="Enter your name"
+            variant="outlined"
+            size="small"
+            sx={{
+              '& .MuiInputBase-root': {
+                color: '#f8fafc',
+                background: 'rgba(0, 0, 0, 0.35)',
+                borderRadius: '10px',
+              },
+            }}
+          />
+        </Box>
+        {profileEditError ? (
+          <Typography sx={{ mt: 1, color: '#fca5a5', fontWeight: 600 }}>{profileEditError}</Typography>
+        ) : null}
+        <Box sx={{ mt: 1.5, display: 'flex', justifyContent: 'center', gap: 1.25 }}>
+          <Button variant="outlined" onClick={handleCloseProfileEdit}>
+            Cancel
+          </Button>
+          <Button variant="contained" onClick={handleSaveProfileEdit}>
+            Save
+          </Button>
+        </Box>
+      </Dialog>
 
       <IconButton
         className="room-comment-fab"

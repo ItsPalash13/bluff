@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Avatar, Box, Typography } from '@mui/material'
+import { Avatar, Box, IconButton, Typography } from '@mui/material'
+import EditIcon from '@mui/icons-material/Edit'
 import crownImg from '../../assets/crown.png'
 import { getCharacterImageUrlByIndex, getCharacterCount } from '../../assets/characters/characterImageSources'
 import { theme1 } from '../../theme/theme1'
@@ -12,6 +13,9 @@ export function Lobby({
   turnSecondsLeft,
   gameEnded = false,
   playerCardCounts,
+  canEditProfile = false,
+  mySocketId = '',
+  onEditProfile = null,
 }) {
   const themeId = theme1.pokerFelt.green.characterFolder
   const totalCharacters = getCharacterCount(themeId)
@@ -84,6 +88,7 @@ export function Lobby({
           const chatMessage = messageBubbles[user.socketId]
           const bubbleMessage = actionMessage || chatMessage
           const bubbleIsAction = Boolean(actionMessage)
+          const canEditThisUser = Boolean(canEditProfile && onEditProfile && mySocketId && user.socketId === mySocketId)
           const hasTurnTimer = (room.turnSeconds ?? 0) > 0
           const totalTurnSeconds = Math.max(1, room.turnSeconds || 1)
           const currentSeconds =
@@ -132,6 +137,16 @@ export function Lobby({
                       : 'none',
                   }}
                 />
+                {canEditThisUser ? (
+                  <IconButton
+                    size="small"
+                    className="lobby-seat__edit-avatar-btn"
+                    aria-label="Edit profile"
+                    onClick={() => onEditProfile(user)}
+                  >
+                    <EditIcon fontSize="small" />
+                  </IconButton>
+                ) : null}
                 {isHost ? (
                   <Box className="lobby-seat__host-crown">
                     <img src={crownImg} alt="" className="lobby-seat__host-crown-img" />

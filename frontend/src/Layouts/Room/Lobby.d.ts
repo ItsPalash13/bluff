@@ -32,4 +32,7 @@ export const Lobby: ComponentType<{
   turnSecondsLeft?: number
   gameEnded?: boolean
   playerCardCounts?: Record<string, number>
+  canEditProfile?: boolean
+  mySocketId?: string
+  onEditProfile?: (user: LobbyUser) => void
 }>

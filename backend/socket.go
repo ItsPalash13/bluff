@@ -224,6 +224,31 @@ func newSocketServer() *server.Server {
 			}
 		})
 
+		socket.On("room:updateProfile", func(args ...any) {
+			payload := parseRoomPayload(args)
+			fmt.Printf("[socket] room:updateProfile from=%s name=%q characterIndex=%d\n", socketID, payload.Name, payload.CharacterIndex)
+			if !isValidName(payload.Name) {
+				fmt.Printf("[socket] room:updateProfile rejected socket=%s reason=INVALID_NAME\n", socketID)
+				socket.Emit("room:error", map[string]any{
+					"code":    "INVALID_NAME",
+					"message": "Name is required to update profile.",
+				})
+				return
+			}
+			state, errCode, errMsg := store.updateUserProfile(socketID, payload.Name, payload.CharacterIndex)
+			if errCode != "" {
+				fmt.Printf("[socket] room:updateProfile rejected socket=%s code=%s message=%q\n", socketID, errCode, errMsg)
+				socket.Emit("room:error", map[string]any{
+					"code":    errCode,
+					"message": errMsg,
+				})
+				return
+			}
+			if state != nil {
+				emitRoomState(io, state)
+			}
+		})
+
 		socket.On("room:start", func(args ...any) {
 			payload := parseRoomStartPayload(args)
 			fmt.Printf("[socket] room:start from=%s turnSeconds=%d totalCards=%d\n",
@@ -472,6 +497,36 @@ func (s *roomStore) updateRoomSettings(socketID string, p roomSettingsPayload) (
 	state.Capacity = fixedRoomCapacity
 	state.TotalCards = totalCards
 	return cloneRoomState(state), "", ""
+}
+
+func (s *roomStore) updateUserProfile(socketID, name string, characterIndex int) (*RoomState, string, string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	roomID, ok := s.socketToRoom[socketID]
+	if !ok {
+		return nil, "ROOM_NOT_FOUND", "You are not in a room."
+	}
+
+	state, exists := s.rooms[roomID]
+	if !exists {
+		return nil, "ROOM_NOT_FOUND", "Room does not exist."
+	}
+
+	if state.Status != roomStatusWaiting {
+		return nil, "INVALID_ROOM_STATUS", "Profile can only be changed while the room is waiting."
+	}
+
+	for i := range state.Users {
+		if state.Users[i].SocketID != socketID {
+			continue
+		}
+		state.Users[i].Name = name
+		state.Users[i].CharacterIndex = characterIndex
+		return cloneRoomState(state), "", ""
+	}
+
+	return nil, "ROOM_NOT_FOUND", "You are not in this room."
 }
 
 func (s *roomStore) startRoom(socketID string, p roomStartPayload) (*RoomState, string, string) {
