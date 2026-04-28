@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"math/rand"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -77,13 +78,37 @@ func newRoomStore() *roomStore {
 	}
 }
 
-func newSocketServer() *server.Server {
-	opts := server.DefaultServerOptions()
-	opts.SetCors(&types.Cors{
-		Origin: []any{
+// allowedCorsOrigins reads comma-separated browser origins from ALLOWED_ORIGINS.
+// Example: "http://localhost:5173,https://app.example.com"
+// If empty, local Vite dev defaults are used.
+func allowedCorsOrigins() []any {
+	raw := strings.TrimSpace(os.Getenv("ALLOWED_ORIGINS"))
+	if raw == "" {
+		return []any{
 			"http://localhost:5173",
 			"http://127.0.0.1:5173",
-		},
+		}
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]any, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return []any{"http://localhost:5173"}
+	}
+	return out
+}
+
+func newSocketServer() *server.Server {
+	origins := allowedCorsOrigins()
+	fmt.Printf("cors: allowed origins = %v\n", origins)
+	opts := server.DefaultServerOptions()
+	opts.SetCors(&types.Cors{
+		Origin:      origins,
 		Methods:     []string{"GET", "POST"},
 		Credentials: true,
 	})

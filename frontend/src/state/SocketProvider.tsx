@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react'
 import { io, type Socket } from 'socket.io-client'
+import { getApiBaseUrl } from '../config/apiBase'
 
 type SocketContextValue = {
   socket: Socket | null
@@ -24,8 +25,9 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       return socketRef.current
     }
 
-    console.debug('[socket][provider] creating socket instance')
-    const nextSocket = io('http://localhost:8080', {
+    const serverUrl = getApiBaseUrl()
+    console.debug('[socket][provider] creating socket instance', { serverUrl })
+    const nextSocket = io(serverUrl, {
       path: '/socket.io/',
       autoConnect: false,
     })
