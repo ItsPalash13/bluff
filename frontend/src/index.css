@@ -15,7 +15,8 @@
   --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
   --mono: ui-monospace, Consolas, monospace;
 
-  font: 18px/145% var(--sans);
+  /* Reduce global UI scale so 100% browser zoom matches prior comfortable sizing. */
+  font: 16px/145% var(--sans);
   letter-spacing: 0.18px;
   color-scheme: light dark;
   color: var(--text);
@@ -27,7 +28,7 @@
   -moz-osx-font-smoothing: grayscale;
 
   @media (max-width: 1024px) {
-    font-size: 16px;
+    font-size: 15px;
   }
 }
 
@@ -68,6 +69,13 @@ body {
   margin: 0;
   /* Keep pile flush and other off-screen transforms from widening the page / showing a horiz. scrollbar */
   overflow-x: hidden;
+}
+
+/* Desktop-only global shrink at app container level (not html). */
+@media (min-width: 701px) {
+  #root {
+    zoom: 0.9;
+  }
 }
 
 h1,
