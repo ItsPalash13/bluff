@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Avatar, Box, Button, Dialog, Paper, Stack, TextField, Typography } from '@mui/material'
+import { Alert, Avatar, Box, Button, Paper, Stack, TextField, Typography } from '@mui/material'
 import { useParams } from 'react-router-dom'
 import { CharacterCardSelector } from '../../assets/characters/CharacterCardSelector'
 import { getCharacterImageUrlByIndex } from '../../assets/characters/characterImageSources'
+import { apiUrl } from '../../config/apiBase'
 import { theme1 } from '../../theme/theme1'
 import { useAppSocket } from '../../state/SocketProvider'
 import type { RoomState } from '../roomTypes'
@@ -11,12 +12,47 @@ import '../../App.css'
 type CreateNJoinProps = {
   /** True while the websocket is not connected yet: show a minimal “connecting” state. */
   readonly connecting: boolean
-  readonly onJoined: (room: RoomState, name: string) => void
+  readonly onJoined: (room: RoomState, name: string, playerId: string) => void
+}
+
+type JoinAckPayload = {
+  room?: RoomState
+  playerId?: string
+}
+
+const roomSessionStorageKey = (roomId: string) => `bluff:session:${roomId.toUpperCase()}`
+
+type JoinEligibilityPhase = 'loading' | 'eligible' | 'manual'
+
+function initialJoinEligibilityPhase(roomIdFromPath: string | undefined): JoinEligibilityPhase {
+  if (typeof window === 'undefined' || !roomIdFromPath) return 'manual'
+  const norm = roomIdFromPath.trim().toUpperCase()
+  try {
+    const raw = window.localStorage.getItem(roomSessionStorageKey(norm))
+    if (!raw) return 'manual'
+    // Reconnect bootstrap: session must carry room instance version + reconnect identity.
+    const parsed = JSON.parse(raw) as { playerId?: string; name?: string; version?: number }
+    if (
+      parsed.playerId &&
+      parsed.name &&
+      typeof parsed.version === 'number' &&
+      Number.isFinite(parsed.version) &&
+      parsed.version > 0
+    ) {
+      return 'loading'
+    }
+  } catch {
+    /* empty */
+  }
+  return 'manual'
 }
 
 export function CreateNJoin({ connecting, onJoined }: CreateNJoinProps) {
   const { socket, ensureConnected } = useAppSocket()
   const { roomId: roomIdFromPath } = useParams()
+  const [joinEligibility, setJoinEligibility] = useState<JoinEligibilityPhase>(() =>
+    initialJoinEligibilityPhase(roomIdFromPath),
+  )
   const [name, setName] = useState('')
   const nameRef = useRef(name)
   nameRef.current = name
@@ -27,29 +63,94 @@ export function CreateNJoin({ connecting, onJoined }: CreateNJoinProps) {
   const [loadingDots, setLoadingDots] = useState('.')
   const [error, setError] = useState('')
   const [roomCode, setRoomCode] = useState('')
-  const [mobileNoticeOpen, setMobileNoticeOpen] = useState(false)
+  const autoJoinAttemptedRef = useRef<string>('')
 
   const selectedImage = useMemo(
     () => getCharacterImageUrlByIndex(themeId, selectedIndex),
     [themeId, selectedIndex],
   )
 
-  const isMobileClient = useMemo(() => {
-    if (typeof navigator === 'undefined' || typeof window === 'undefined') return false
-    const ua = navigator.userAgent || ''
-    const isMobileUa = /Android|iPhone|iPad|iPod|Mobile|Windows Phone/i.test(ua)
-    const isSmallViewport = window.innerWidth <= 500
-    return isMobileUa || isSmallViewport
-  }, [])
-
-  const isJoinMode = Boolean(roomIdFromPath) || isMobileClient
+  const isJoinMode = Boolean(roomIdFromPath)
   const joinRoomCode = (roomIdFromPath ?? roomCode).trim().toUpperCase()
 
+  const showJoinRouteGateLoader = useMemo(
+    () =>
+      isJoinMode &&
+      (joinEligibility === 'loading' || (joinEligibility === 'eligible' && isPending)),
+    [isJoinMode, joinEligibility, isPending],
+  )
+
   useEffect(() => {
-    if (isMobileClient) {
-      setMobileNoticeOpen(true)
+    autoJoinAttemptedRef.current = ''
+    if (!roomIdFromPath) {
+      setJoinEligibility('manual')
+      return
     }
-  }, [isMobileClient])
+    const norm = roomIdFromPath.trim().toUpperCase()
+    // Route re-entry reconnect flow starts from persisted session lookup.
+    const rawSession = window.localStorage.getItem(roomSessionStorageKey(norm))
+    if (!rawSession) {
+      setJoinEligibility('manual')
+      return
+    }
+    let parsed: {
+      name?: string
+      characterIndex?: number
+      playerId?: string
+      version?: number
+    }
+    try {
+      parsed = JSON.parse(rawSession) as typeof parsed
+    } catch {
+      window.localStorage.removeItem(roomSessionStorageKey(norm))
+      setJoinEligibility('manual')
+      return
+    }
+    if (
+      !parsed.playerId ||
+      !parsed.name ||
+      typeof parsed.version !== 'number' ||
+      !Number.isFinite(parsed.version) ||
+      parsed.version <= 0
+    ) {
+      setJoinEligibility('manual')
+      return
+    }
+    // Reconnect gating loader while backend validates roomId + playerId + version.
+    setJoinEligibility('loading')
+    let cancelled = false
+    ;(async () => {
+      try {
+        const params = new URLSearchParams({
+          roomId: norm,
+          playerId: parsed.playerId ?? '',
+          version: String(parsed.version),
+        })
+        const res = await fetch(`${apiUrl('/api/rooms/eligibility')}?${params}`)
+        const data = (await res.json()) as { eligible?: boolean }
+        if (cancelled) return
+        if (data.eligible === true) {
+          // Reconnect eligible: prepare one auto room:join emit.
+          setName(parsed.name ?? '')
+          setSelectedIndex(
+            typeof parsed.characterIndex === 'number' && Number.isFinite(parsed.characterIndex)
+              ? parsed.characterIndex
+              : 0,
+          )
+          setJoinEligibility('eligible')
+        } else {
+          // Reconnect not eligible (stale identity/version/room mismatch): clear session.
+          window.localStorage.removeItem(roomSessionStorageKey(norm))
+          setJoinEligibility('manual')
+        }
+      } catch {
+        if (!cancelled) setJoinEligibility('manual')
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [roomIdFromPath])
 
   useEffect(() => {
     if (!isPending) {
@@ -94,22 +195,68 @@ export function CreateNJoin({ connecting, onJoined }: CreateNJoinProps) {
       return
     }
 
-    const onRoomCreated = (nextState: RoomState) => {
-      console.debug('[socket][room] room:created', nextState)
-      setIsPending(false)
-      setError('')
-      onJoined(nextState, nameRef.current.trim() || 'Player')
+    // Persist reconnect identity for next route refresh/background recovery.
+    const persistSession = (room: RoomState, playerId?: string) => {
+      if (!playerId) return
+      window.localStorage.setItem(
+        roomSessionStorageKey(room.id),
+        JSON.stringify({
+          roomId: room.id,
+          playerId,
+          version: room.version,
+          name: nameRef.current.trim() || 'Player',
+          characterIndex: selectedIndex,
+          savedAt: Date.now(),
+        }),
+      )
+    }
+    const normalizeJoinAck = (payload: RoomState | JoinAckPayload): JoinAckPayload => {
+      if ('users' in (payload as RoomState)) {
+        return { room: payload as RoomState }
+      }
+      return payload as JoinAckPayload
     }
 
-    const onRoomJoined = (nextState: RoomState) => {
-      console.debug('[socket][room] room:joined', nextState)
+    const onRoomCreated = (payload: RoomState | JoinAckPayload) => {
+      const nextPayload = normalizeJoinAck(payload)
+      const nextState = nextPayload.room
+      if (!nextState) return
+      console.debug('[socket][room] room:created', nextPayload)
       setIsPending(false)
       setError('')
-      onJoined(nextState, nameRef.current.trim() || 'Player')
+      persistSession(nextState, nextPayload.playerId)
+      onJoined(
+        nextState,
+        nameRef.current.trim() || 'Player',
+        nextPayload.playerId ?? '',
+      )
     }
 
-    const onRoomError = (payload: { message?: string }) => {
+    const onRoomJoined = (payload: RoomState | JoinAckPayload) => {
+      const nextPayload = normalizeJoinAck(payload)
+      const nextState = nextPayload.room
+      if (!nextState) return
+      console.debug('[socket][room] room:joined', nextPayload)
+      setIsPending(false)
+      setError('')
+      persistSession(nextState, nextPayload.playerId)
+      onJoined(
+        nextState,
+        nameRef.current.trim() || 'Player',
+        nextPayload.playerId ?? '',
+      )
+    }
+
+    const onRoomError = (payload: { code?: string; message?: string }) => {
       console.debug('[socket][room] room:error', payload)
+      if (
+        (payload.code === 'RECONNECT_WINDOW_EXPIRED' || payload.code === 'ROOM_NOT_JOINABLE') &&
+        joinRoomCode
+      ) {
+        // Server rejected reconnect identity for this route; clear stale session.
+        window.localStorage.removeItem(roomSessionStorageKey(joinRoomCode))
+      }
+      setJoinEligibility('manual')
       setError(payload.message ?? 'Something went wrong while processing room request.')
       setIsPending(false)
     }
@@ -123,7 +270,52 @@ export function CreateNJoin({ connecting, onJoined }: CreateNJoinProps) {
       socket.off('room:joined', onRoomJoined)
       socket.off('room:error', onRoomError)
     }
-  }, [socket, connecting, onJoined, roomIdFromPath])
+  }, [socket, connecting, onJoined, roomIdFromPath, joinRoomCode, selectedIndex])
+
+  useEffect(() => {
+    if (!roomIdFromPath || connecting) return
+    if (joinEligibility !== 'eligible') return
+    const normalizedRoom = roomIdFromPath.trim().toUpperCase()
+    if (!normalizedRoom || autoJoinAttemptedRef.current === normalizedRoom) return
+    autoJoinAttemptedRef.current = normalizedRoom
+    const rawSession = window.localStorage.getItem(roomSessionStorageKey(normalizedRoom))
+    if (!rawSession) {
+      setJoinEligibility('manual')
+      return
+    }
+    try {
+      const parsed = JSON.parse(rawSession) as {
+        name?: string
+        characterIndex?: number
+        playerId?: string
+        version?: number
+      }
+      if (
+        !parsed.playerId ||
+        !parsed.name ||
+        typeof parsed.version !== 'number' ||
+        !Number.isFinite(parsed.version) ||
+        parsed.version <= 0
+      ) {
+        return
+      }
+      setIsPending(true)
+      setError('')
+      // Reconnect claim emit: playerId maps this socket to prior room slot.
+      ensureConnected().emit('room:join', {
+        roomId: normalizedRoom,
+        name: parsed.name,
+        characterIndex:
+          typeof parsed.characterIndex === 'number' && Number.isFinite(parsed.characterIndex)
+            ? parsed.characterIndex
+            : 0,
+        playerId: parsed.playerId,
+      })
+    } catch {
+      window.localStorage.removeItem(roomSessionStorageKey(normalizedRoom))
+      setJoinEligibility('manual')
+    }
+  }, [roomIdFromPath, connecting, ensureConnected, joinEligibility])
 
   const handleCreateRoom = () => {
     if (!name.trim()) {
@@ -162,6 +354,25 @@ export function CreateNJoin({ connecting, onJoined }: CreateNJoinProps) {
       roomId: joinRoomCode,
       name: name.trim(),
       characterIndex: selectedIndex,
+      // If a reconnect session exists for this room code, include playerId/version.
+      ...(window.localStorage.getItem(roomSessionStorageKey(joinRoomCode))
+        ? (() => {
+            try {
+              const parsed = JSON.parse(
+                window.localStorage.getItem(roomSessionStorageKey(joinRoomCode)) ?? '{}',
+              ) as { playerId?: string; version?: number }
+              return {
+                playerId: parsed.playerId ?? '',
+                version:
+                  typeof parsed.version === 'number' && Number.isFinite(parsed.version)
+                    ? parsed.version
+                    : 0,
+              }
+            } catch {
+              return {}
+            }
+          })()
+        : {}),
     })
   }
 
@@ -187,6 +398,37 @@ export function CreateNJoin({ connecting, onJoined }: CreateNJoinProps) {
             Bluff
           </Typography>
           <Typography sx={{ color: '#e5e7eb' }}>Connecting to server…</Typography>
+        </Paper>
+      </Box>
+    )
+  }
+
+  if (showJoinRouteGateLoader) {
+    return (
+      <Box className="lobby-center">
+        <Paper
+          elevation={0}
+          sx={{
+            width: 'min(700px, 100%)',
+            borderRadius: '14px',
+            p: 3,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 2,
+            background: 'rgba(0, 0, 0, 0.25)',
+            border: '1px solid rgba(255, 255, 255, 0.18)',
+            backdropFilter: 'blur(2px)',
+          }}
+        >
+          <Typography variant="h5" sx={{ color: '#f8fafc', fontWeight: 700 }}>
+            Bluff
+          </Typography>
+          <Typography sx={{ color: '#e5e7eb' }}>
+            {joinEligibility === 'loading'
+              ? 'Checking your session…'
+              : 'Reconnecting to room…'}
+          </Typography>
         </Paper>
       </Box>
     )
@@ -226,7 +468,7 @@ export function CreateNJoin({ connecting, onJoined }: CreateNJoinProps) {
         />
 
         <Box sx={{ width: 'min(420px, 100%)' }}>
-          {isMobileClient && !roomIdFromPath ? (
+          {isJoinMode && !roomIdFromPath ? (
             <>
               <Typography sx={{ color: '#e5e7eb', fontWeight: 600, mb: 0.75 }}>Room code</Typography>
               <TextField
@@ -286,25 +528,6 @@ export function CreateNJoin({ connecting, onJoined }: CreateNJoinProps) {
           </Typography>
         ) : null}
       </Paper>
-      <Dialog
-        open={mobileNoticeOpen}
-        onClose={() => setMobileNoticeOpen(false)}
-        classes={{ paper: 'rank-modal profile-edit-modal' }}
-        slotProps={{ backdrop: { className: 'rank-modal__backdrop' } }}
-      >
-        <Typography className="rank-modal__title">MOBILE NOTICE</Typography>
-        <Typography sx={{ color: '#f8fafc', textAlign: 'center', mb: 1.5, maxWidth: 460 }}>
-          Hi Mobile User! You can join and play existing rooms, but creating a new room isn’t available right now.
-          <br />
-          <br />
-          For the full experience, please use a laptop or desktop.
-        </Typography>
-        <Box sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}>
-          <Button variant="contained" color="success" onClick={() => setMobileNoticeOpen(false)}>
-            Continue to Join
-          </Button>
-        </Box>
-      </Dialog>
     </Box>
   )
 }

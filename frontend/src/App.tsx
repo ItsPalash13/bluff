@@ -10,6 +10,8 @@ import type { RoomSession, RoomState } from './Layouts/roomTypes'
 import './App.css'
 import logo from './assets/logo.png'
 
+const roomSessionStorageKey = (roomId: string) => `bluff:session:${roomId.toUpperCase()}`
+
 export default function App() {
   return (
     <SocketProvider>
@@ -29,8 +31,8 @@ function AppShell() {
   const previousRoomIdRef = useRef<string | undefined>(undefined)
 
   const handleJoined = useCallback(
-    (room: RoomState, name: string) => {
-      setRoomSession({ room, name })
+    (room: RoomState, name: string, playerId: string) => {
+      setRoomSession({ room, name, playerId })
       navigate(`/${room.id}`, { replace: true })
     },
     [navigate],
@@ -43,6 +45,7 @@ function AppShell() {
       if (socket) {
         socket.emit('room:leave')
       }
+      window.localStorage.removeItem(roomSessionStorageKey(roomSession.room.id))
       dispatch(setCommentOpen(false))
       disconnect()
       setRoomSession(null)

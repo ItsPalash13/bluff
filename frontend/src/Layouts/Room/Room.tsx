@@ -8,11 +8,13 @@ import {
 } from 'react'
 import {
   Avatar,
+  Alert,
   Box,
   Button,
   Dialog,
   IconButton,
   Paper,
+  Snackbar,
   TextField,
   Typography,
 } from '@mui/material'
@@ -134,7 +136,7 @@ export function Room({ roomSession }: RoomProps) {
   const [openCallReveal, setOpenCallReveal] = useState<OpenReveal | null>(null)
   const [gameActionToast, setGameActionToast] = useState<{
     id: number
-    socketId: string
+    playerId: string
     text: string
   } | null>(null)
   const gameToastIdRef = useRef(0)
@@ -142,16 +144,17 @@ export function Room({ roomSession }: RoomProps) {
   const [profileEditName, setProfileEditName] = useState('')
   const [profileEditCharacterIndex, setProfileEditCharacterIndex] = useState(0)
   const [profileEditError, setProfileEditError] = useState('')
+  const [shareToastOpen, setShareToastOpen] = useState(false)
   const match = useMatch('/:roomId')
   const roomId = match?.params.roomId
   const shareUrl = `${window.location.origin}/${roomState.id}`
   const isHost = Boolean(socket && roomState.hostSocketId === socket.id)
   const roomStatus = gameStatus || roomState.status || 'waiting'
   const canEdit = isHost && roomStatus === 'waiting'
-  const mySocketId = socket?.id ?? ''
+  const myPlayerId = roomSession.playerId
   const myUser = useMemo(
-    () => roomState.users.find((user) => user.socketId === mySocketId),
-    [roomState.users, mySocketId],
+    () => roomState.users.find((user) => user.playerId === myPlayerId),
+    [roomState.users, myPlayerId],
   )
   const rankOptions = useMemo(() => {
     const hand = turnUpdate?.yourHand ?? []
@@ -159,7 +162,7 @@ export function Room({ roomSession }: RoomProps) {
     return RANK_ORDER.filter((rank) => uniqueRanks.has(rank))
   }, [turnUpdate])
 
-  const isMyTurn = Boolean(turnUpdate && mySocketId && turnUpdate.currentPlayerId === mySocketId)
+  const isMyTurn = Boolean(turnUpdate && myPlayerId && turnUpdate.currentPlayerId === myPlayerId)
   const hasCurrentBet = Boolean(turnUpdate?.currentBet)
   const isInRound = roomStatus === 'in_round'
   const isGameEnd = roomStatus === 'game_end'
@@ -171,12 +174,12 @@ export function Room({ roomSession }: RoomProps) {
   const canPass = isInRound && isMyTurn && hasCurrentBet
   const canCallBluff = useMemo(() => {
     if (!turnUpdate || !isInRound || !hasCurrentBet) return false
-    return turnUpdate.lastBetPlayerId !== mySocketId
-  }, [turnUpdate, isInRound, hasCurrentBet, mySocketId])
+    return turnUpdate.lastBetPlayerId !== myPlayerId
+  }, [turnUpdate, isInRound, hasCurrentBet, myPlayerId])
   const nameBySocketId = useMemo(
     () =>
       roomState.users.reduce<Record<string, string>>((acc, user) => {
-        acc[user.socketId] = user.name
+        acc[user.playerId] = user.name
         return acc
       }, {}),
     [roomState.users],
@@ -194,7 +197,7 @@ export function Room({ roomSession }: RoomProps) {
   const lastBettorId = turnUpdate?.lastBetPlayerId ?? ''
   const lastBettorName = lastBettorId ? nameBySocketId[lastBettorId] ?? '' : ''
   const lastBettorUser = useMemo(
-    () => (lastBettorId ? roomState.users.find((u) => u.socketId === lastBettorId) : undefined),
+    () => (lastBettorId ? roomState.users.find((u) => u.playerId === lastBettorId) : undefined),
     [lastBettorId, roomState.users],
   )
   const handThemeId = theme1.pokerFelt.green.characterFolder
@@ -307,7 +310,7 @@ export function Room({ roomSession }: RoomProps) {
       const rank = typeof p.rank === 'string' && p.rank ? p.rank : '?'
       const text = `Bluff ${count} ${rank}`.trim()
       gameToastIdRef.current += 1
-      setGameActionToast({ id: gameToastIdRef.current, socketId: id, text })
+      setGameActionToast({ id: gameToastIdRef.current, playerId: id, text })
     }
     const onPlayerPass = (raw: unknown) => {
       if (!raw || typeof raw !== 'object') return
@@ -315,7 +318,7 @@ export function Room({ roomSession }: RoomProps) {
       const id = p.playerId
       if (typeof id !== 'string' || !id) return
       gameToastIdRef.current += 1
-      setGameActionToast({ id: gameToastIdRef.current, socketId: id, text: 'Pass' })
+      setGameActionToast({ id: gameToastIdRef.current, playerId: id, text: 'Pass' })
     }
     const onBluffCalled = (raw: unknown) => {
       if (!raw || typeof raw !== 'object') return
@@ -323,7 +326,7 @@ export function Room({ roomSession }: RoomProps) {
       const id = p.callerId
       if (typeof id !== 'string' || !id) return
       gameToastIdRef.current += 1
-      setGameActionToast({ id: gameToastIdRef.current, socketId: id, text: 'Call' })
+      setGameActionToast({ id: gameToastIdRef.current, playerId: id, text: 'Call' })
     }
     socket.on('player_move', onPlayerMove)
     socket.on('player_pass', onPlayerPass)
@@ -341,8 +344,8 @@ export function Room({ roomSession }: RoomProps) {
     const onBluffResult = (raw: unknown) => {
       const payload = parseBluffResultPayload(raw)
       if (!payload) return
-      const callerUser = roomUsersRef.current.find((u) => u.socketId === payload.callerId)
-      const targetUser = roomUsersRef.current.find((u) => u.socketId === payload.targetId)
+      const callerUser = roomUsersRef.current.find((u) => u.playerId === payload.callerId)
+      const targetUser = roomUsersRef.current.find((u) => u.playerId === payload.targetId)
       const callerName =
         payload.callerName ?? nameBySocketIdRef.current[payload.callerId] ?? callerUser?.name ?? 'Player'
       const targetName =
@@ -454,10 +457,34 @@ export function Room({ roomSession }: RoomProps) {
   }
 
   const handleCopyLink = async () => {
+    const showCopiedToast = () => setShareToastOpen(true)
+    const fallbackCopy = (text: string): boolean => {
+      try {
+        const ta = document.createElement('textarea')
+        ta.value = text
+        ta.setAttribute('readonly', '')
+        ta.style.position = 'fixed'
+        ta.style.opacity = '0'
+        document.body.appendChild(ta)
+        ta.focus()
+        ta.select()
+        const ok = document.execCommand('copy')
+        document.body.removeChild(ta)
+        return ok
+      } catch {
+        return false
+      }
+    }
+
     try {
       await navigator.clipboard.writeText(shareUrl)
+      showCopiedToast()
     } catch (error) {
-      console.error('Failed to copy room link', error)
+      if (!fallbackCopy(shareUrl)) {
+        console.error('Failed to share/copy room link', error)
+      } else {
+        showCopiedToast()
+      }
     }
   }
 
@@ -533,7 +560,7 @@ export function Room({ roomSession }: RoomProps) {
         gameEnded={isGameEnd}
         playerCardCounts={turnUpdate?.playerCardCounts}
         canEditProfile={roomStatus === 'waiting'}
-        mySocketId={mySocketId}
+        myPlayerId={myPlayerId}
         onEditProfile={handleOpenProfileEdit}
       />
 
@@ -826,6 +853,16 @@ export function Room({ roomSession }: RoomProps) {
       >
         <ChatIcon />
       </IconButton>
+      <Snackbar
+        open={shareToastOpen}
+        autoHideDuration={1600}
+        onClose={() => setShareToastOpen(false)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert severity="success" variant="filled" sx={{ py: 0 }}>
+          Link copied
+        </Alert>
+      </Snackbar>
     </Box>
   )
 }

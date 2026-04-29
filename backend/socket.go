@@ -1,9 +1,13 @@
 package main
 
 import (
+	crand "crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"math/rand"
+	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,13 +30,18 @@ var (
 )
 
 type RoomUser struct {
+	PlayerID       string `json:"playerId"`
 	SocketID       string `json:"socketId"`
 	Name           string `json:"name"`
 	CharacterIndex int    `json:"characterIndex"`
+	Connected      bool   `json:"connected"`
+	DisconnectedAt int64  `json:"disconnectedAt"`
 }
 
 type RoomState struct {
 	ID           string     `json:"id"`
+	// Version is a room-instance identifier used by reconnect eligibility checks.
+	Version      int64      `json:"version"`
 	HostSocketID string     `json:"hostSocketId"`
 	Capacity     int        `json:"capacity"`
 	Status       string     `json:"status"`
@@ -45,6 +54,7 @@ type roomPayload struct {
 	Name           string `json:"name"`
 	CharacterIndex int    `json:"characterIndex"`
 	RoomID         string `json:"roomId"`
+	PlayerID       string `json:"playerId"`
 }
 
 type roomMessagePayload struct {
@@ -65,16 +75,24 @@ type roomStore struct {
 	mu           sync.Mutex
 	rooms        map[string]*RoomState
 	socketToRoom map[string]string
+	socketToUser map[string]string
+	// expiredUsers tracks reconnect identities that missed grace expiry per room.
+	expiredUsers map[string]map[string]bool
 	games        map[string]*GameState
 	turnTimers   map[string]chan struct{}
+	// disconnectTimers keeps waiting-lobby reconnect grace timers by room:player.
+	disconnectTimers map[string]*time.Timer
 }
 
 func newRoomStore() *roomStore {
 	return &roomStore{
 		rooms:        map[string]*RoomState{},
 		socketToRoom: map[string]string{},
+		socketToUser: map[string]string{},
+		expiredUsers: map[string]map[string]bool{},
 		games:        map[string]*GameState{},
 		turnTimers:   map[string]chan struct{}{},
+		disconnectTimers: map[string]*time.Timer{},
 	}
 }
 
@@ -103,7 +121,7 @@ func allowedCorsOrigins() []any {
 	return out
 }
 
-func newSocketServer() *server.Server {
+func newSocketServer() (*server.Server, *roomStore) {
 	origins := allowedCorsOrigins()
 	fmt.Printf("cors: allowed origins = %v\n", origins)
 	opts := server.DefaultServerOptions()
@@ -133,10 +151,13 @@ func newSocketServer() *server.Server {
 				return
 			}
 
-			state := store.createRoom(socketID, payload.Name, payload.CharacterIndex)
+			state, user := store.createRoom(socketID, payload.Name, payload.CharacterIndex)
 			fmt.Printf("[socket] room:create success socket=%s room=%s users=%d\n", socketID, state.ID, len(state.Users))
 			socket.Join(server.Room(state.ID))
-			socket.Emit("room:created", state)
+			socket.Emit("room:created", map[string]any{
+				"room":     state,
+				"playerId": user.PlayerID,
+			})
 			emitRoomState(io, state)
 		})
 
@@ -152,7 +173,7 @@ func newSocketServer() *server.Server {
 				return
 			}
 
-			state, errCode, errMsg := store.joinRoom(socketID, payload.RoomID, payload.Name, payload.CharacterIndex)
+			state, user, errCode, errMsg := store.joinRoom(socketID, payload.RoomID, payload.Name, payload.CharacterIndex, payload.PlayerID)
 			if errCode != "" {
 				fmt.Printf("[socket] room:join rejected socket=%s room=%q code=%s message=%q\n", socketID, payload.RoomID, errCode, errMsg)
 				socket.Emit("room:error", map[string]any{
@@ -164,7 +185,10 @@ func newSocketServer() *server.Server {
 
 			fmt.Printf("[socket] room:join success socket=%s room=%s users=%d\n", socketID, state.ID, len(state.Users))
 			socket.Join(server.Room(state.ID))
-			socket.Emit("room:joined", state)
+			socket.Emit("room:joined", map[string]any{
+				"room":     state,
+				"playerId": user.PlayerID,
+			})
 			emitRoomState(io, state)
 		})
 
@@ -316,14 +340,64 @@ func newSocketServer() *server.Server {
 				}
 			}
 			fmt.Printf("client disconnected: %s reason=%s\n", socketID, reason)
-			state, _ := store.leaveRoom(io, socketID)
+			state, _ := store.disconnectSocket(io, socketID)
 			if state != nil {
 				emitRoomState(io, state)
 			}
 		})
 	})
 
-	return io
+	return io, store
+}
+
+// handleRoomEligibility reports whether a reconnect attempt is valid for a room instance.
+// Frontend calls this before auto-rejoin using roomId + playerId + version.
+func handleRoomEligibility(store *roomStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method != http.MethodGet {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		roomID := strings.TrimSpace(strings.ToUpper(r.URL.Query().Get("roomId")))
+		playerID := strings.TrimSpace(r.URL.Query().Get("playerId"))
+		versionRaw := strings.TrimSpace(r.URL.Query().Get("version"))
+		// Reconnect version must be parseable and positive; invalid means ineligible.
+		version, err := strconv.ParseInt(versionRaw, 10, 64)
+		if err != nil || version <= 0 {
+			version = 0
+		}
+		w.Header().Set("Content-Type", "application/json")
+		eligible := store.playerInRoom(roomID, playerID, version)
+		_, _ = w.Write([]byte(fmt.Sprintf(`{"eligible":%t}`, eligible)))
+	}
+}
+
+func (s *roomStore) playerInRoom(roomID, playerID string, version int64) bool {
+	if roomID == "" || playerID == "" || version <= 0 {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state, ok := s.rooms[roomID]
+	if !ok {
+		return false
+	}
+	// Reconnect guard: prevent stale local session from older room instances.
+	if state.Version != version {
+		return false
+	}
+	for _, u := range state.Users {
+		if u.PlayerID == playerID {
+			return true
+		}
+	}
+	return false
 }
 
 func emitRoomState(io *server.Server, state *RoomState) {
@@ -351,6 +425,9 @@ func parseRoomPayload(args []any) roomPayload {
 	}
 	if roomID, ok := raw["roomId"].(string); ok {
 		payload.RoomID = roomID
+	}
+	if playerID, ok := raw["playerId"].(string); ok {
+		payload.PlayerID = strings.TrimSpace(playerID)
 	}
 	if characterIndex, ok := raw["characterIndex"].(float64); ok {
 		payload.CharacterIndex = int(characterIndex)
@@ -433,7 +510,17 @@ func isAllowedTotalCards(n int) bool {
 	return n == 26 || n == 39 || n == 52
 }
 
-func (s *roomStore) createRoom(socketID, name string, characterIndex int) *RoomState {
+const reconnectGrace = 30 * time.Second
+
+func randomID(prefix string) string {
+	b := make([]byte, 16)
+	if _, err := crand.Read(b); err != nil {
+		return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
+	}
+	return fmt.Sprintf("%s-%s", prefix, hex.EncodeToString(b))
+}
+
+func (s *roomStore) createRoom(socketID, name string, characterIndex int) (*RoomState, RoomUser) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -442,8 +529,11 @@ func (s *roomStore) createRoom(socketID, name string, characterIndex int) *RoomS
 	}
 
 	roomID := s.generateUniqueRoomIDLocked()
+	playerID := randomID("p")
 	state := &RoomState{
 		ID:           roomID,
+		// Reconnect version for this concrete room instance.
+		Version:      time.Now().UnixMilli(),
 		HostSocketID: socketID,
 		Capacity:     fixedRoomCapacity,
 		Status:       roomStatusWaiting,
@@ -451,15 +541,19 @@ func (s *roomStore) createRoom(socketID, name string, characterIndex int) *RoomS
 		TotalCards:   26,
 		Users: []RoomUser{
 			{
+				PlayerID:       playerID,
 				SocketID:       socketID,
 				Name:           name,
 				CharacterIndex: characterIndex,
+				Connected:      true,
+				DisconnectedAt: 0,
 			},
 		},
 	}
 	s.rooms[roomID] = state
 	s.socketToRoom[socketID] = roomID
-	return cloneRoomState(state)
+	s.socketToUser[socketID] = playerID
+	return cloneRoomState(state), state.Users[0]
 }
 
 func (s *roomStore) updateRoomSettings(socketID string, p roomSettingsPayload) (*RoomState, string, string) {
@@ -518,7 +612,7 @@ func (s *roomStore) updateUserProfile(socketID, name string, characterIndex int)
 	}
 
 	for i := range state.Users {
-		if state.Users[i].SocketID != socketID {
+		if state.Users[i].PlayerID != s.socketToUser[socketID] {
 			continue
 		}
 		state.Users[i].Name = name
@@ -564,39 +658,92 @@ func (s *roomStore) startRoom(socketID string, p roomStartPayload) (*RoomState, 
 	return cloneRoomState(state), "", ""
 }
 
-func (s *roomStore) joinRoom(socketID, roomID, name string, characterIndex int) (*RoomState, string, string) {
+func (s *roomStore) joinRoom(socketID, roomID, name string, characterIndex int, playerID string) (*RoomState, RoomUser, string, string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	state, exists := s.rooms[roomID]
 	if !exists {
-		return nil, "ROOM_NOT_FOUND", "Room does not exist."
+		return nil, RoomUser{}, "ROOM_NOT_FOUND", "Room does not exist."
+	}
+	// Reconnect is intentionally lobby-only.
+	if state.Status != roomStatusWaiting {
+		return nil, RoomUser{}, "ROOM_NOT_JOINABLE", "Cannot join or rejoin a room that has already started or finished."
 	}
 
 	if oldRoomID, ok := s.socketToRoom[socketID]; ok && oldRoomID != roomID {
 		s.removeFromRoomLocked(nil, socketID, oldRoomID)
 	}
 
+	// Reconnect reclaim path: match existing slot by playerId and swap socket.
+	reclaimed := -1
+	if playerID != "" {
+		for i := range state.Users {
+			if playerID != "" && state.Users[i].PlayerID == playerID {
+				reclaimed = i
+				break
+			}
+		}
+	}
+	if reclaimed != -1 {
+		user := &state.Users[reclaimed]
+		if expired, ok := s.expiredUsers[roomID]; ok {
+			delete(expired, user.PlayerID)
+		}
+		// Cancel pending reconnect grace timer because user reclaimed successfully.
+		timerKey := roomID + ":" + user.PlayerID
+		if t, ok := s.disconnectTimers[timerKey]; ok {
+			t.Stop()
+			delete(s.disconnectTimers, timerKey)
+		}
+		oldSocketID := user.SocketID
+		user.SocketID = socketID
+		user.Connected = true
+		user.DisconnectedAt = 0
+		if state.HostSocketID == oldSocketID {
+			state.HostSocketID = socketID
+		}
+		s.socketToRoom[socketID] = roomID
+		s.socketToUser[socketID] = user.PlayerID
+		if oldSocketID != "" && oldSocketID != socketID {
+			delete(s.socketToRoom, oldSocketID)
+			delete(s.socketToUser, oldSocketID)
+		}
+		return cloneRoomState(state), *user, "", ""
+	}
+
 	for _, user := range state.Users {
-		if user.SocketID == socketID {
-			return cloneRoomState(state), "", ""
+		if user.SocketID == socketID || (playerID != "" && user.PlayerID == playerID) {
+			return cloneRoomState(state), user, "", ""
+		}
+	}
+
+	if expired, ok := s.expiredUsers[roomID]; ok {
+		if playerID != "" && expired[playerID] {
+			if state.Status != roomStatusWaiting {
+				return nil, RoomUser{}, "RECONNECT_WINDOW_EXPIRED", "Oops, socket disconnected. Game is underway."
+			}
 		}
 	}
 
 	if len(state.Users) >= state.Capacity {
-		return nil, "ROOM_FULL", "Room is full."
+		return nil, RoomUser{}, "ROOM_FULL", "Room is full."
 	}
-	if state.Status != roomStatusWaiting {
-		return nil, "ROOM_NOT_JOINABLE", "Cannot join a room that has already started or finished."
-	}
-
-	state.Users = append(state.Users, RoomUser{
+	newUser := RoomUser{
+		PlayerID:       randomID("p"),
 		SocketID:       socketID,
 		Name:           name,
 		CharacterIndex: characterIndex,
-	})
+		Connected:      true,
+		DisconnectedAt: 0,
+	}
+	state.Users = append(state.Users, newUser)
 	s.socketToRoom[socketID] = roomID
-	return cloneRoomState(state), "", ""
+	s.socketToUser[socketID] = newUser.PlayerID
+	if expired, ok := s.expiredUsers[roomID]; ok {
+		delete(expired, newUser.PlayerID)
+	}
+	return cloneRoomState(state), newUser, "", ""
 }
 
 func (s *roomStore) leaveRoom(io *server.Server, socketID string) (*RoomState, string) {
@@ -610,6 +757,78 @@ func (s *roomStore) leaveRoom(io *server.Server, socketID string) (*RoomState, s
 
 	state := s.removeFromRoomLocked(io, socketID, roomID)
 	return state, roomID
+}
+
+func (s *roomStore) disconnectSocket(io *server.Server, socketID string) (*RoomState, string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	roomID, ok := s.socketToRoom[socketID]
+	if !ok {
+		return nil, ""
+	}
+	state, exists := s.rooms[roomID]
+	if !exists {
+		delete(s.socketToRoom, socketID)
+		delete(s.socketToUser, socketID)
+		return nil, roomID
+	}
+	playerID := s.socketToUser[socketID]
+	if state.Status != roomStatusWaiting {
+		// Outside waiting lobby, disconnect is treated as hard leave immediately.
+		next := s.removeFromRoomByPlayerLocked(io, playerID, roomID)
+		return next, roomID
+	}
+	for i := range state.Users {
+		if state.Users[i].PlayerID != playerID {
+			continue
+		}
+		state.Users[i].Connected = false
+		state.Users[i].DisconnectedAt = time.Now().UnixMilli()
+		// Waiting-lobby reconnect grace timer starts on disconnect.
+		timerKey := roomID + ":" + playerID
+		if t, ok := s.disconnectTimers[timerKey]; ok {
+			t.Stop()
+		}
+		s.disconnectTimers[timerKey] = time.AfterFunc(reconnectGrace, func() {
+			s.hardRemoveDisconnectedUser(io, roomID, playerID)
+		})
+		break
+	}
+	delete(s.socketToRoom, socketID)
+	delete(s.socketToUser, socketID)
+	return cloneRoomState(state), roomID
+}
+
+func (s *roomStore) hardRemoveDisconnectedUser(io *server.Server, roomID, playerID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	timerKey := roomID + ":" + playerID
+	delete(s.disconnectTimers, timerKey)
+	state, exists := s.rooms[roomID]
+	if !exists {
+		return
+	}
+	// If user already reclaimed, do nothing.
+	for _, user := range state.Users {
+		if user.PlayerID == playerID && user.Connected {
+			return
+		}
+	}
+	for _, user := range state.Users {
+		if user.PlayerID == playerID {
+			state = s.removeFromRoomByPlayerLocked(io, playerID, roomID)
+			break
+		}
+	}
+	// Mark reconnect identity as expired to block stale auto-rejoin attempts.
+	if _, ok := s.expiredUsers[roomID]; !ok {
+		s.expiredUsers[roomID] = map[string]bool{}
+	}
+	s.expiredUsers[roomID][playerID] = true
+	if state != nil {
+		emitRoomState(io, state)
+	}
 }
 
 func (s *roomStore) getSocketRoomAndName(socketID string) (string, string, bool) {
@@ -626,8 +845,9 @@ func (s *roomStore) getSocketRoomAndName(socketID string) (string, string, bool)
 		return "", "", false
 	}
 
+	playerID := s.socketToUser[socketID]
 	for _, user := range state.Users {
-		if user.SocketID == socketID {
+		if user.PlayerID == playerID {
 			return roomID, user.Name, true
 		}
 	}
@@ -636,18 +856,44 @@ func (s *roomStore) getSocketRoomAndName(socketID string) (string, string, bool)
 }
 
 func (s *roomStore) removeFromRoomLocked(io *server.Server, socketID, roomID string) *RoomState {
+	playerID := s.socketToUser[socketID]
+	if playerID != "" {
+		return s.removeFromRoomByPlayerLocked(io, playerID, roomID)
+	}
 	state, exists := s.rooms[roomID]
 	if !exists {
 		delete(s.socketToRoom, socketID)
+		delete(s.socketToUser, socketID)
+		return nil
+	}
+	return cloneRoomState(state)
+}
+
+func (s *roomStore) removeFromRoomByPlayerLocked(io *server.Server, playerID, roomID string) *RoomState {
+	state, exists := s.rooms[roomID]
+	if !exists {
 		return nil
 	}
 
+	socketID := ""
+	for _, u := range state.Users {
+		if u.PlayerID == playerID {
+			socketID = u.SocketID
+			break
+		}
+	}
+	timerKey := roomID + ":" + playerID
+	if t, ok := s.disconnectTimers[timerKey]; ok {
+		t.Stop()
+		delete(s.disconnectTimers, timerKey)
+	}
+
 	if game, ok := s.games[roomID]; ok {
-		wasCurrentTurn := game.currentPlayerID() == socketID
-		wasLastBettor := game.LastBetPlayerID == socketID
-		delete(game.Hands, socketID)
+		wasCurrentTurn := game.currentPlayerID() == playerID
+		wasLastBettor := game.LastBetPlayerID == playerID
+		delete(game.Hands, playerID)
 		for idx := 0; idx < len(game.TurnOrder); idx++ {
-			if game.TurnOrder[idx] == socketID {
+			if game.TurnOrder[idx] == playerID {
 				game.TurnOrder = append(game.TurnOrder[:idx], game.TurnOrder[idx+1:]...)
 				if len(game.TurnOrder) == 0 {
 					game.TurnIndex = 0
@@ -658,14 +904,14 @@ func (s *roomStore) removeFromRoomLocked(io *server.Server, socketID, roomID str
 			}
 		}
 		if io != nil {
-			outcome := s.handlePlayerDepartureLocked(io, state, game, socketID, wasCurrentTurn, wasLastBettor)
-			s.emitDepartureOutcomeLocked(io, state, game, outcome, socketID, "player_left")
+			outcome := s.handlePlayerDepartureLocked(io, state, game, playerID, wasCurrentTurn, wasLastBettor)
+			s.emitDepartureOutcomeLocked(io, state, game, outcome, playerID, "player_left")
 		}
 	}
 
 	nextUsers := make([]RoomUser, 0, len(state.Users))
 	for _, user := range state.Users {
-		if user.SocketID == socketID {
+		if user.PlayerID == playerID {
 			continue
 		}
 		nextUsers = append(nextUsers, user)
@@ -673,15 +919,17 @@ func (s *roomStore) removeFromRoomLocked(io *server.Server, socketID, roomID str
 
 	state.Users = nextUsers
 	delete(s.socketToRoom, socketID)
+	delete(s.socketToUser, socketID)
 
 	if len(state.Users) == 0 {
 		s.stopTimerLocked(roomID)
 		delete(s.games, roomID)
 		delete(s.rooms, roomID)
+		delete(s.expiredUsers, roomID)
 		return nil
 	}
 
-	if state.HostSocketID == socketID {
+	if state.HostSocketID == socketID || state.HostSocketID == "" {
 		state.HostSocketID = state.Users[0].SocketID
 	}
 

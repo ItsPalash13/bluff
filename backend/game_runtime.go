@@ -209,7 +209,7 @@ func (s *roomStore) initializeGameLocked(state *RoomState) *GameState {
 
 	turnOrder := make([]string, 0, len(state.Users))
 	for _, user := range state.Users {
-		turnOrder = append(turnOrder, user.SocketID)
+		turnOrder = append(turnOrder, user.PlayerID)
 	}
 	roomRng.Shuffle(len(turnOrder), func(i, j int) {
 		turnOrder[i], turnOrder[j] = turnOrder[j], turnOrder[i]
@@ -226,7 +226,7 @@ func (s *roomStore) initializeGameLocked(state *RoomState) *GameState {
 
 	playerNames := make(map[string]string, len(state.Users))
 	for _, u := range state.Users {
-		playerNames[u.SocketID] = u.Name
+		playerNames[u.PlayerID] = u.Name
 	}
 
 	return &GameState{
@@ -251,14 +251,14 @@ func (s *roomStore) playBet(io *server.Server, socketID string, p gamePlayBetPay
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	state, game, errCode, errMsg := s.getRoomAndGameBySocketLocked(socketID)
+	state, game, playerID, errCode, errMsg := s.getRoomAndGameBySocketLocked(socketID)
 	if errCode != "" {
 		return errCode, errMsg
 	}
 	if state.Status != roomStatusInRound || game.Status != roomStatusInRound {
 		return "INVALID_ROOM_STATUS", "Game is not in progress."
 	}
-	if socketID != game.currentPlayerID() {
+	if playerID != game.currentPlayerID() {
 		return "NOT_TURN", "It is not your turn."
 	}
 
@@ -275,30 +275,30 @@ func (s *roomStore) playBet(io *server.Server, socketID string, p gamePlayBetPay
 		return "INVALID_MOVE", "You must continue with the same rank."
 	}
 
-	selectedCards, ok := extractCardsFromHand(game.Hands[socketID], p.CardIDs)
+	selectedCards, ok := extractCardsFromHand(game.Hands[playerID], p.CardIDs)
 	if !ok {
 		return "INVALID_MOVE", "You can only play cards from your hand."
 	}
-	game.Hands[socketID] = removeCardsByID(game.Hands[socketID], p.CardIDs)
+	game.Hands[playerID] = removeCardsByID(game.Hands[playerID], p.CardIDs)
 	game.Pile = append(game.Pile, selectedCards...)
 	game.LastPlayedCards = selectedCards
 
 	previousLastBettor := game.LastBetPlayerID
 	if game.CurrentBet == nil {
-		game.FirstBetPlayerID = socketID
+		game.FirstBetPlayerID = playerID
 	}
-	game.CurrentBet = &BetState{Rank: p.Rank, Count: p.Count, PlayerID: socketID}
-	game.LastBetPlayerID = socketID
+	game.CurrentBet = &BetState{Rank: p.Rank, Count: p.Count, PlayerID: playerID}
+	game.LastBetPlayerID = playerID
 	game.PassCount = 0
 	// A new valid bet resolves the previous last bettor's unresolved responsibility.
 	s.recordIfFinishedLocked(game, previousLastBettor)
-	s.recordIfFinishedLocked(game, socketID)
+	s.recordIfFinishedLocked(game, playerID)
 	if s.tryEndGameLocked(io, state, game) {
 		return "", ""
 	}
 
 	io.To(server.Room(state.ID)).Emit("player_move", map[string]any{
-		"playerId":  socketID,
+		"playerId":  playerID,
 		"rank":      p.Rank,
 		"count":     p.Count,
 		"pileCount": len(game.Pile),
@@ -314,29 +314,29 @@ func (s *roomStore) passTurn(io *server.Server, socketID string, reason string) 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	state, game, errCode, errMsg := s.getRoomAndGameBySocketLocked(socketID)
+	state, game, playerID, errCode, errMsg := s.getRoomAndGameBySocketLocked(socketID)
 	if errCode != "" {
 		return errCode, errMsg
 	}
 	if state.Status != roomStatusInRound || game.Status != roomStatusInRound {
 		return "INVALID_ROOM_STATUS", "Game is not in progress."
 	}
-	if socketID != game.currentPlayerID() {
+	if playerID != game.currentPlayerID() {
 		return "NOT_TURN", "It is not your turn."
 	}
 	if game.CurrentBet == nil {
 		return "INVALID_MOVE", "Cannot pass before the initial bet."
 	}
 
-	shouldFlush := socketID == game.LastBetPlayerID && game.PassCount >= s.activePlayerCountLocked(game)-1
+	shouldFlush := playerID == game.LastBetPlayerID && game.PassCount >= s.activePlayerCountLocked(game)-1
 	if shouldFlush {
-		s.flushRoundLocked(io, state, game, socketID)
+		s.flushRoundLocked(io, state, game, playerID)
 		return "", ""
 	}
 
 	game.PassCount++
 	io.To(server.Room(state.ID)).Emit("player_pass", map[string]any{
-		"playerId": socketID,
+		"playerId": playerID,
 		"reason":   reason,
 	})
 	s.moveToNextActiveLocked(game)
@@ -350,14 +350,14 @@ func (s *roomStore) passTurn(io *server.Server, socketID string, reason string) 
 
 // roomUserDisplayForBluff resolves name and character index for a socket from the live
 // room user list, or from the game's name snapshot if they are no longer in Users.
-func roomUserDisplayForBluff(state *RoomState, game *GameState, socketID string) (name string, characterIndex int) {
+func roomUserDisplayForBluff(state *RoomState, game *GameState, playerID string) (name string, characterIndex int) {
 	for i := range state.Users {
-		if state.Users[i].SocketID == socketID {
+		if state.Users[i].PlayerID == playerID {
 			return state.Users[i].Name, state.Users[i].CharacterIndex
 		}
 	}
 	if game != nil && game.PlayerNames != nil {
-		if n, ok := game.PlayerNames[socketID]; ok && strings.TrimSpace(n) != "" {
+		if n, ok := game.PlayerNames[playerID]; ok && strings.TrimSpace(n) != "" {
 			return strings.TrimSpace(n), 0
 		}
 	}
@@ -368,7 +368,7 @@ func (s *roomStore) callBluff(io *server.Server, socketID string) (string, strin
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	state, game, errCode, errMsg := s.getRoomAndGameBySocketLocked(socketID)
+	state, game, callerID, errCode, errMsg := s.getRoomAndGameBySocketLocked(socketID)
 	if errCode != "" {
 		return errCode, errMsg
 	}
@@ -378,12 +378,12 @@ func (s *roomStore) callBluff(io *server.Server, socketID string) (string, strin
 	if game.CurrentBet == nil || game.LastBetPlayerID == "" {
 		return "INVALID_MOVE", "No active bet to challenge."
 	}
-	if socketID == game.LastBetPlayerID {
+	if callerID == game.LastBetPlayerID {
 		return "INVALID_MOVE", "You cannot call bluff on your own bet."
 	}
 
 	io.To(server.Room(state.ID)).Emit("bluff_called", map[string]any{
-		"callerId": socketID,
+		"callerId": callerID,
 		"targetId": game.LastBetPlayerID,
 	})
 
@@ -396,7 +396,7 @@ func (s *roomStore) callBluff(io *server.Server, socketID string) (string, strin
 	}
 
 	lastBettorID := game.LastBetPlayerID
-	targetPlayerID := socketID
+	targetPlayerID := callerID
 	if bluffCaught {
 		targetPlayerID = lastBettorID
 	}
@@ -404,11 +404,11 @@ func (s *roomStore) callBluff(io *server.Server, socketID string) (string, strin
 	revealCards := append([]Card(nil), game.LastPlayedCards...)
 	claimedRank := game.CurrentBet.Rank
 	claimedCount := game.CurrentBet.Count
-	callerName, callerCharIdx := roomUserDisplayForBluff(state, game, socketID)
+	callerName, callerCharIdx := roomUserDisplayForBluff(state, game, callerID)
 	targetName, targetCharIdx := roomUserDisplayForBluff(state, game, lastBettorID)
 	game.Hands[targetPlayerID] = append(game.Hands[targetPlayerID], game.Pile...)
 	io.To(server.Room(state.ID)).Emit("bluff_result", map[string]any{
-		"callerId":             socketID,
+		"callerId":             callerID,
 		"targetId":             lastBettorID,
 		"callerName":           callerName,
 		"callerCharacterIndex": callerCharIdx,
@@ -431,7 +431,7 @@ func (s *roomStore) callBluff(io *server.Server, socketID string) (string, strin
 
 	desiredAnchor := lastBettorID
 	if bluffCaught {
-		desiredAnchor = socketID
+		desiredAnchor = callerID
 	}
 	var nextStarter string
 	if len(game.Hands[desiredAnchor]) > 0 {
@@ -621,12 +621,15 @@ func (s *roomStore) emitTurnUpdateLocked(io *server.Server, state *RoomState, ga
 		"playerCardCounts": s.playerCardCountsLocked(game),
 	}
 	for _, user := range state.Users {
+		if !user.Connected || strings.TrimSpace(user.SocketID) == "" {
+			continue
+		}
 		payload := map[string]any{}
 		for k, v := range base {
 			payload[k] = v
 		}
-		payload["yourPlayerId"] = user.SocketID
-		payload["yourHand"] = append([]Card(nil), game.Hands[user.SocketID]...)
+		payload["yourPlayerId"] = user.PlayerID
+		payload["yourHand"] = append([]Card(nil), game.Hands[user.PlayerID]...)
 		io.To(server.Room(user.SocketID)).Emit("turn_update", payload)
 	}
 }
@@ -794,20 +797,24 @@ func (s *roomStore) playerCardCountsLocked(game *GameState) map[string]int {
 	return out
 }
 
-func (s *roomStore) getRoomAndGameBySocketLocked(socketID string) (*RoomState, *GameState, string, string) {
+func (s *roomStore) getRoomAndGameBySocketLocked(socketID string) (*RoomState, *GameState, string, string, string) {
 	roomID, ok := s.socketToRoom[socketID]
 	if !ok {
-		return nil, nil, "ROOM_NOT_FOUND", "You are not in a room."
+		return nil, nil, "", "ROOM_NOT_FOUND", "You are not in a room."
+	}
+	playerID, ok := s.socketToUser[socketID]
+	if !ok || playerID == "" {
+		return nil, nil, "", "ROOM_NOT_FOUND", "You are not in a room."
 	}
 	state, ok := s.rooms[roomID]
 	if !ok {
-		return nil, nil, "ROOM_NOT_FOUND", "Room does not exist."
+		return nil, nil, "", "ROOM_NOT_FOUND", "Room does not exist."
 	}
 	game, ok := s.games[roomID]
 	if !ok {
-		return nil, nil, "ROOM_NOT_FOUND", "Game has not started yet."
+		return nil, nil, "", "ROOM_NOT_FOUND", "Game has not started yet."
 	}
-	return state, game, "", ""
+	return state, game, playerID, "", ""
 }
 
 func (s *roomStore) activePlayerCountLocked(game *GameState) int {

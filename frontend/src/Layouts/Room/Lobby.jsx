@@ -14,7 +14,7 @@ export function Lobby({
   gameEnded = false,
   playerCardCounts,
   canEditProfile = false,
-  mySocketId = '',
+  myPlayerId = '',
   onEditProfile = null,
 }) {
   const themeId = theme1.pokerFelt.green.characterFolder
@@ -52,21 +52,21 @@ export function Lobby({
   }, [lastMessage])
 
   useEffect(() => {
-    if (!gameActionToast?.socketId || !gameActionToast.text) return
-    const { socketId, text } = gameActionToast
+    if (!gameActionToast?.playerId || !gameActionToast.text) return
+    const { playerId, text } = gameActionToast
     const normalized = String(text).trim().slice(0, maxBubbleChars) || '—'
-    setActionBubbles((prev) => ({ ...prev, [socketId]: normalized }))
-    const prevTimer = actionBubbleTimersRef.current[socketId]
+    setActionBubbles((prev) => ({ ...prev, [playerId]: normalized }))
+    const prevTimer = actionBubbleTimersRef.current[playerId]
     if (prevTimer) {
       clearTimeout(prevTimer)
     }
-    actionBubbleTimersRef.current[socketId] = setTimeout(() => {
+    actionBubbleTimersRef.current[playerId] = setTimeout(() => {
       setActionBubbles((prev) => {
         const next = { ...prev }
-        delete next[socketId]
+        delete next[playerId]
         return next
       })
-      delete actionBubbleTimersRef.current[socketId]
+      delete actionBubbleTimersRef.current[playerId]
     }, actionBubbleTimeoutMs)
   }, [gameActionToast])
 
@@ -83,12 +83,12 @@ export function Lobby({
         {room.users.map((user) => {
           const avatarUrl = getCharacterImageUrlByIndex(themeId, Math.min(user.characterIndex, totalCharacters - 1))
           const isHost = user.socketId === room.hostSocketId
-          const isCurrentTurn = Boolean(!gameEnded && currentTurnPlayerId && user.socketId === currentTurnPlayerId)
-          const actionMessage = actionBubbles[user.socketId]
+          const isCurrentTurn = Boolean(!gameEnded && currentTurnPlayerId && user.playerId === currentTurnPlayerId)
+          const actionMessage = actionBubbles[user.playerId]
           const chatMessage = messageBubbles[user.socketId]
           const bubbleMessage = actionMessage || chatMessage
           const bubbleIsAction = Boolean(actionMessage)
-          const canEditThisUser = Boolean(canEditProfile && onEditProfile && mySocketId && user.socketId === mySocketId)
+          const canEditThisUser = Boolean(canEditProfile && onEditProfile && myPlayerId && user.playerId === myPlayerId)
           const hasTurnTimer = (room.turnSeconds ?? 0) > 0
           const totalTurnSeconds = Math.max(1, room.turnSeconds || 1)
           const currentSeconds =
@@ -104,7 +104,7 @@ export function Lobby({
           // Full time: yellow (hue 48). Near zero: red (hue 0).
           const turnFillColor = `hsl(${48 * timeRemainingRatio}deg 92% 50%)`
           return (
-            <Box key={user.socketId} className="lobby-seat">
+            <Box key={user.playerId} className="lobby-seat">
               <Box sx={{ position: 'relative' }}>
                 {bubbleMessage ? (
                   <Box
@@ -132,6 +132,7 @@ export function Lobby({
                     width: 64,
                     height: 64,
                     border: isCurrentTurn ? '4px solid #22c55e' : '2px solid #cbd5e1',
+                    opacity: user.connected ? 1 : 0.5,
                     boxShadow: isCurrentTurn
                       ? '0 0 0 3px rgba(16, 185, 129, 0.45), 0 0 20px rgba(34, 197, 94, 0.65), 0 0 34px rgba(34, 197, 94, 0.4)'
                       : 'none',
@@ -159,6 +160,11 @@ export function Lobby({
                 ) : null}
               </Box>
               <Typography className="lobby-seat__name">{user.name}</Typography>
+              {!user.connected ? (
+                <Typography className="lobby-seat__name" sx={{ color: '#fca5a5', fontSize: '0.72rem' }}>
+                  Disconnected
+                </Typography>
+              ) : null}
               {isCurrentTurn && hasTurnTimer ? (
                 <Box className="lobby-seat__turn-progress-row" aria-label="Turn progress">
                   <Box className="lobby-seat__turn-progress">

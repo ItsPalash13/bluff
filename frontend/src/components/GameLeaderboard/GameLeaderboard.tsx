@@ -5,7 +5,7 @@ import { theme1 } from '../../theme/theme1'
 import './GameLeaderboard.css'
 
 export type GameLeaderboardUser = {
-  socketId: string
+  playerId: string
   name: string
   characterIndex: number
 }
@@ -45,7 +45,7 @@ function labelFor(
 }
 
 function resolveAvatarUrl(users: GameLeaderboardUser[] | undefined, socketId: string, themeId: string): string {
-  const u = users?.find((x) => x.socketId === socketId)
+  const u = users?.find((x) => x.playerId === socketId)
   if (!u) return ''
   const n = getCharacterCount(themeId)
   if (n <= 0) return ''

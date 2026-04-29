@@ -1,11 +1,15 @@
 export type RoomUser = {
+  playerId: string
   socketId: string
   name: string
   characterIndex: number
+  connected: boolean
+  disconnectedAt: number
 }
 
 export type RoomState = {
   id: string
+  version: number
   hostSocketId: string
   capacity: number
   status: string
@@ -24,6 +28,7 @@ export type RoomMessage = {
 export type RoomSession = {
   room: RoomState
   name: string
+  playerId: string
 }
 
 export type GameCard = {

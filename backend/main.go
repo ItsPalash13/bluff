@@ -18,9 +18,10 @@ func main() {
 	}
 	defer cleanup()
 
-	io := newSocketServer()
+	io, roomStore := newSocketServer()
 
 	http.Handle("/socket.io/", io.ServeHandler(nil))
+	http.HandleFunc("/api/rooms/eligibility", handleRoomEligibility(roomStore))
 	http.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"message":"socket.io ping/pong server running","socketPath":"/socket.io/"}`))
