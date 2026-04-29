@@ -19,16 +19,35 @@ export type OpenReveal = {
   claimedCount: number
 }
 
+type ViewerBorderAccent = 'default' | 'lose' | 'win'
+
+function viewerBorderAccent(viewerPlayerId: string | null | undefined, data: OpenReveal): ViewerBorderAccent {
+  if (!viewerPlayerId) return 'default'
+  const { callerId, targetId, wasRight } = data
+  if (wasRight) {
+    // Caught: target's bluff was exposed — target loses, caller wins.
+    if (viewerPlayerId === targetId) return 'lose'
+    if (viewerPlayerId === callerId) return 'win'
+    return 'default'
+  }
+  // Tricked: caller was wrong — caller loses, target wins.
+  if (viewerPlayerId === callerId) return 'lose'
+  if (viewerPlayerId === targetId) return 'win'
+  return 'default'
+}
+
 type OpenRevealModalProps = {
   reveal: OpenReveal | null
   themeId: string
   cardThemeId?: string
+  /** Current user's player id — red/green borders and verdict accent for involved players; neutral for others. */
+  viewerPlayerId?: string | null
 }
 
 const REVEAL_MODAL_APPEAR_MS = 420
 const REVEAL_MODAL_DISMISS_MS = 300
 
-export function OpenRevealModal({ reveal, themeId, cardThemeId }: OpenRevealModalProps) {
+export function OpenRevealModal({ reveal, themeId, cardThemeId, viewerPlayerId }: OpenRevealModalProps) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [display, setDisplay] = useState<OpenReveal | null>(null)
   const revealRef = useRef<OpenReveal | null>(reveal)
@@ -61,21 +80,35 @@ export function OpenRevealModal({ reveal, themeId, cardThemeId }: OpenRevealModa
   const targetAvatarUrl = charCount > 0 ? getCharacterImageUrlByIndex(themeId, targetIdx) : ''
   const caught = data.wasRight
 
-  const verdictClass = caught
-    ? 'open-reveal-modal__verdict open-reveal-modal__verdict--caught'
-    : 'open-reveal-modal__verdict open-reveal-modal__verdict--tricked'
   const verdictText = caught ? 'CAUGHT' : 'TRICKED'
   const verdictSub =
     caught
       ? `${data.callerName} caught ${data.targetName}'s bluff`
       : `${data.targetName} tricked ${data.callerName}`
 
+  const borderAccent = viewerBorderAccent(viewerPlayerId, data)
+  const verdictClass = [
+    'open-reveal-modal__verdict',
+    borderAccent === 'lose' && 'open-reveal-modal__verdict--you-lose',
+    borderAccent === 'win' && 'open-reveal-modal__verdict--you-win',
+    borderAccent === 'default' && 'open-reveal-modal__verdict--neutral',
+  ]
+    .filter(Boolean)
+    .join(' ')
+  const paperClassName = [
+    'open-reveal-modal',
+    borderAccent === 'lose' ? 'open-reveal-modal--you-lose' : '',
+    borderAccent === 'win' ? 'open-reveal-modal--you-win' : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+
   return (
     <Dialog
       open={dialogOpen}
       onClose={() => {}}
       keepMounted
-      classes={{ paper: 'open-reveal-modal' }}
+      classes={{ paper: paperClassName }}
       slots={{ transition: Grow }}
       slotProps={{
         transition: {

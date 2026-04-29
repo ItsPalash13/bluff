@@ -813,6 +813,7 @@ export function Room({ roomSession }: RoomProps) {
         reveal={openCallReveal}
         themeId={handThemeId}
         cardThemeId={theme1.pokerFelt.green.cardFolder}
+        viewerPlayerId={myPlayerId}
       />
 
       <Dialog
