@@ -1,5 +1,15 @@
 import { useEffect, useState } from 'react'
-import { Box, Button, FormControl, InputLabel, MenuItem, Select, Stack, Typography } from '@mui/material'
+import {
+  Box,
+  Button,
+  CircularProgress,
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Select,
+  Stack,
+  Typography,
+} from '@mui/material'
 import type { SelectChangeEvent } from '@mui/material/Select'
 
 type RoomSettingsProps = {
@@ -80,10 +90,6 @@ export function RoomSettings({
         <Typography sx={{ color: 'rgba(252, 211, 77, 0.95)', fontSize: '0.9rem' }}>
           Settings are locked while the game is in progress.
         </Typography>
-      ) : !canEdit ? (
-        <Typography sx={{ color: 'rgba(203, 213, 225, 0.95)', fontSize: '0.9rem' }}>
-          Waiting for the host to start the game.
-        </Typography>
       ) : null}
 
       <FormControl size="small" fullWidth>
@@ -128,8 +134,19 @@ export function RoomSettings({
           variant="contained"
           disabled={!canEdit || !isWaiting}
           onClick={() => onStart({ turnSeconds, totalCards })}
+          sx={
+            isWaiting && !canEdit
+              ? {
+                  '&.Mui-disabled': { opacity: 0.92 },
+                  '&.Mui-disabled .MuiCircularProgress-root': { opacity: 1 },
+                }
+              : undefined
+          }
         >
           Start
+          {isWaiting && !canEdit ? (
+            <CircularProgress size={14} sx={{ ml: 1, color: 'rgba(255,255,255,0.92)' }} />
+          ) : null}
         </Button>
       </Stack>
     </Box>
