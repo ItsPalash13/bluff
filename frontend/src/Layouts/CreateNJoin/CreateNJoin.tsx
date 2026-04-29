@@ -4,6 +4,7 @@ import { useParams } from 'react-router-dom'
 import { CharacterCardSelector } from '../../assets/characters/CharacterCardSelector'
 import { getCharacterImageUrlByIndex } from '../../assets/characters/characterImageSources'
 import { apiUrl } from '../../config/apiBase'
+import { roomSessionStorageKey } from '../../session/roomSessionStorage'
 import { theme1 } from '../../theme/theme1'
 import { useAppSocket } from '../../state/SocketProvider'
 import type { RoomState } from '../roomTypes'
@@ -19,8 +20,6 @@ type JoinAckPayload = {
   room?: RoomState
   playerId?: string
 }
-
-const roomSessionStorageKey = (roomId: string) => `bluff:session:${roomId.toUpperCase()}`
 
 type JoinEligibilityPhase = 'loading' | 'eligible' | 'manual'
 

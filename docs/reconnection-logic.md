@@ -97,3 +97,7 @@ flowchart TD
 
 - `playerId` is the reconnect identity now; `reconnectToken` is no longer used.
 - Room code uniqueness is enforced only among active rooms, so `room.version` is required to safely distinguish old vs new room instances sharing the same code over time.
+
+## Related
+
+- [Waiting Lobby: foreground / mobile recovery](./waiting-lobby-foreground-recovery.md)—why eligibility + reclaim had to exist in **`Room`**, not only **`CreateNJoin`**, especially on deployed mobile.

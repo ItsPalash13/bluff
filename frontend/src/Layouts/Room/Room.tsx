@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -19,10 +20,11 @@ import {
   Typography,
 } from '@mui/material'
 import ChatIcon from '@mui/icons-material/Chat'
-import { useMatch } from 'react-router-dom'
 import { Lobby } from './Lobby'
 import { RoomSettings } from './RoomSettings'
 import { RankingBoard } from '../../components/RankingBoard'
+import { apiUrl } from '../../config/apiBase'
+import { roomSessionStorageKey } from '../../session/roomSessionStorage'
 import { useAppSocket } from '../../state/SocketProvider'
 import { useAppDispatch, useAppSelector } from '../../store/hooks'
 import { setCommentOpen } from '../../store/uiSlice'
@@ -117,7 +119,7 @@ function parseBluffResultPayload(raw: unknown): BluffResultPayload | null {
 }
 
 export function Room({ roomSession }: RoomProps) {
-  const { socket } = useAppSocket()
+  const { socket, ensureConnected } = useAppSocket()
   const dispatch = useAppDispatch()
   const commentOpen = useAppSelector((state) => state.ui.commentOpen)
   const [roomState, setRoomState] = useState<RoomState>(roomSession.room)
@@ -146,8 +148,8 @@ export function Room({ roomSession }: RoomProps) {
   const [profileEditError, setProfileEditError] = useState('')
   const [shareToastOpen, setShareToastOpen] = useState(false)
   const [socketDisconnectModalOpen, setSocketDisconnectModalOpen] = useState(false)
-  const match = useMatch('/:roomId')
-  const roomId = match?.params.roomId
+  /** Matches room payloads from the server regardless of Route tree (Room renders outside Routes). */
+  const roomRouteIdRef = useRef(roomSession.room.id)
   const shareUrl = `${window.location.origin}/${roomState.id}`
   const isHost = Boolean(socket && roomState.hostSocketId === socket.id)
   const roomStatus = gameStatus || roomState.status || 'waiting'
@@ -198,6 +200,9 @@ export function Room({ roomSession }: RoomProps) {
   useEffect(() => {
     roomStatusRef.current = roomStatus
   }, [roomStatus])
+  useEffect(() => {
+    roomRouteIdRef.current = roomSession.room.id
+  }, [roomSession.room.id])
 
   const lastBettorId = turnUpdate?.lastBetPlayerId ?? ''
   const lastBettorName = lastBettorId ? nameBySocketId[lastBettorId] ?? '' : ''
@@ -271,7 +276,8 @@ export function Room({ roomSession }: RoomProps) {
 
     const onRoomState = (nextState: RoomState) => {
       console.debug('[socket][room] room:state', nextState)
-      if (nextState.id === roomId || nextState.id === roomState.id) {
+      const ours = roomRouteIdRef.current
+      if (nextState.id.toUpperCase() === ours.toUpperCase()) {
         setRoomState(nextState)
         setGameStatus(nextState.status || 'waiting')
       }
@@ -417,7 +423,118 @@ export function Room({ roomSession }: RoomProps) {
       socket.io.off('reconnect_failed', onReconnectFailed)
       socket.off('game_end')
     }
-  }, [socket, roomId, roomState.id])
+  }, [socket, roomSession.room.id])
+
+  // Waiting lobby: prod mobile/browser often keeps the SPA mounted when returning from
+  // background — unlike dev remount/HMR — so reconnect must re-hit eligibility +
+  // room:join instead of relying on CreateNJoin lifecycle only.
+  const waitingLobbySyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const runWaitingLobbyReconnect = useCallback(async () => {
+    if (roomStatusRef.current !== 'waiting') return
+    const code = roomSession.room.id.trim().toUpperCase()
+    const raw = window.localStorage.getItem(roomSessionStorageKey(code))
+    if (!raw) return
+    let parsed: {
+      playerId?: string
+      name?: string
+      version?: number
+      characterIndex?: number
+    }
+    try {
+      parsed = JSON.parse(raw) as typeof parsed
+    } catch {
+      return
+    }
+    if (
+      !parsed.playerId ||
+      !parsed.name ||
+      typeof parsed.version !== 'number' ||
+      !Number.isFinite(parsed.version) ||
+      parsed.version <= 0 ||
+      parsed.playerId !== roomSession.playerId
+    ) {
+      return
+    }
+    ensureConnected()
+    try {
+      const params = new URLSearchParams({
+        roomId: code,
+        playerId: parsed.playerId,
+        version: String(parsed.version),
+      })
+      const res = await fetch(`${apiUrl('/api/rooms/eligibility')}?${params}`)
+      const data = (await res.json()) as { eligible?: boolean }
+      if (data.eligible !== true) {
+        window.localStorage.removeItem(roomSessionStorageKey(code))
+        window.location.reload()
+        return
+      }
+    } catch {
+      /* transient HTTP failure — still emit room:join below */
+    }
+    ensureConnected().emit('room:join', {
+      roomId: code,
+      name: parsed.name,
+      characterIndex:
+        typeof parsed.characterIndex === 'number' && Number.isFinite(parsed.characterIndex)
+          ? parsed.characterIndex
+          : 0,
+      playerId: parsed.playerId,
+    })
+  }, [ensureConnected, roomSession.playerId, roomSession.room.id])
+
+  const scheduleWaitingLobbyReconnect = useCallback(() => {
+    if (waitingLobbySyncTimerRef.current) window.clearTimeout(waitingLobbySyncTimerRef.current)
+    waitingLobbySyncTimerRef.current = window.setTimeout(() => {
+      waitingLobbySyncTimerRef.current = null
+      void runWaitingLobbyReconnect()
+    }, 260)
+  }, [runWaitingLobbyReconnect])
+
+  useEffect(() => {
+    const onConnect = () => {
+      scheduleWaitingLobbyReconnect()
+    }
+    socket?.on('connect', onConnect)
+    return () => {
+      socket?.off('connect', onConnect)
+    }
+  }, [socket, scheduleWaitingLobbyReconnect])
+
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') scheduleWaitingLobbyReconnect()
+    }
+    const onOnline = () => scheduleWaitingLobbyReconnect()
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) scheduleWaitingLobbyReconnect()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('online', onOnline)
+    window.addEventListener('pageshow', onPageShow as EventListener)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('online', onOnline)
+      window.removeEventListener('pageshow', onPageShow as EventListener)
+    }
+  }, [scheduleWaitingLobbyReconnect])
+
+  useEffect(() => {
+    if (roomStatus !== 'waiting') return undefined
+    scheduleWaitingLobbyReconnect()
+    return () => undefined
+  }, [roomSession.room.id, roomStatus, scheduleWaitingLobbyReconnect])
+
+  useEffect(
+    () => () => {
+      if (waitingLobbySyncTimerRef.current) {
+        window.clearTimeout(waitingLobbySyncTimerRef.current)
+        waitingLobbySyncTimerRef.current = null
+      }
+    },
+    [],
+  )
 
   const handleSettingsChange = (p: { turnSeconds: number; totalCards: number }) => {
     if (!socket) return

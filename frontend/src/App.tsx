@@ -9,8 +9,7 @@ import { setCommentOpen } from './store/uiSlice'
 import type { RoomSession, RoomState } from './Layouts/roomTypes'
 import './App.css'
 import logo from './assets/logo.png'
-
-const roomSessionStorageKey = (roomId: string) => `bluff:session:${roomId.toUpperCase()}`
+import { roomSessionStorageKey } from './session/roomSessionStorage'
 
 export default function App() {
   return (
