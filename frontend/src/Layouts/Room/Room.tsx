@@ -145,6 +145,7 @@ export function Room({ roomSession }: RoomProps) {
   const [profileEditCharacterIndex, setProfileEditCharacterIndex] = useState(0)
   const [profileEditError, setProfileEditError] = useState('')
   const [shareToastOpen, setShareToastOpen] = useState(false)
+  const [socketDisconnectModalOpen, setSocketDisconnectModalOpen] = useState(false)
   const match = useMatch('/:roomId')
   const roomId = match?.params.roomId
   const shareUrl = `${window.location.origin}/${roomState.id}`
@@ -187,12 +188,16 @@ export function Room({ roomSession }: RoomProps) {
 
   const nameBySocketIdRef = useRef(nameBySocketId)
   const roomUsersRef = useRef(roomState.users)
+  const roomStatusRef = useRef(roomStatus)
   useEffect(() => {
     nameBySocketIdRef.current = nameBySocketId
   }, [nameBySocketId])
   useEffect(() => {
     roomUsersRef.current = roomState.users
   }, [roomState.users])
+  useEffect(() => {
+    roomStatusRef.current = roomStatus
+  }, [roomStatus])
 
   const lastBettorId = turnUpdate?.lastBetPlayerId ?? ''
   const lastBettorName = lastBettorId ? nameBySocketId[lastBettorId] ?? '' : ''
@@ -257,6 +262,11 @@ export function Room({ roomSession }: RoomProps) {
   useEffect(() => {
     if (!socket) {
       return
+    }
+
+    const showSocketDisconnectModal = () => {
+      if (roomStatusRef.current === 'waiting') return
+      setSocketDisconnectModalOpen(true)
     }
 
     const onRoomState = (nextState: RoomState) => {
@@ -372,6 +382,12 @@ export function Room({ roomSession }: RoomProps) {
       })
     }
     socket.on('bluff_result', onBluffResult)
+    const onDisconnect = () => showSocketDisconnectModal()
+    const onConnectError = () => showSocketDisconnectModal()
+    const onReconnectFailed = () => showSocketDisconnectModal()
+    socket.on('disconnect', onDisconnect)
+    socket.on('connect_error', onConnectError)
+    socket.io.on('reconnect_failed', onReconnectFailed)
     socket.on(
       'game_end',
       (payload: { finishedPlayers?: string[]; playerNames?: Record<string, string> }) => {
@@ -396,6 +412,9 @@ export function Room({ roomSession }: RoomProps) {
       socket.off('bluff_called', onBluffCalled)
       socket.off('timer_tick')
       socket.off('bluff_result', onBluffResult)
+      socket.off('disconnect', onDisconnect)
+      socket.off('connect_error', onConnectError)
+      socket.io.off('reconnect_failed', onReconnectFailed)
       socket.off('game_end')
     }
   }, [socket, roomId, roomState.id])
@@ -513,6 +532,11 @@ export function Room({ roomSession }: RoomProps) {
       characterIndex: profileEditCharacterIndex,
     })
     setProfileEditOpen(false)
+  }
+
+  const handleSocketDisconnectAcknowledge = () => {
+    setSocketDisconnectModalOpen(false)
+    window.location.href = '/'
   }
 
   useEffect(() => {
@@ -842,6 +866,23 @@ export function Room({ roomSession }: RoomProps) {
           </Button>
           <Button variant="contained" onClick={handleSaveProfileEdit}>
             Save
+          </Button>
+        </Box>
+      </Dialog>
+
+      <Dialog
+        open={socketDisconnectModalOpen}
+        onClose={handleSocketDisconnectAcknowledge}
+        classes={{ paper: 'rank-modal profile-edit-modal' }}
+        slotProps={{ backdrop: { className: 'rank-modal__backdrop' } }}
+      >
+        <Typography className="rank-modal__title">Oops! Socket disconnected</Typography>
+        <Typography sx={{ mt: 1, textAlign: 'center', color: '#f1f5f9' }}>
+          Connection was lost during the game. You will be taken to home.
+        </Typography>
+        <Box sx={{ mt: 1.5, display: 'flex', justifyContent: 'center' }}>
+          <Button variant="contained" onClick={handleSocketDisconnectAcknowledge}>
+            Go Home
           </Button>
         </Box>
       </Dialog>
