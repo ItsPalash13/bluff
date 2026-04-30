@@ -433,9 +433,10 @@ export function Room({ roomSession }: RoomProps) {
   const runWaitingLobbyReconnect = useCallback(async () => {
     if (roomStatusRef.current !== 'waiting') return
     const code = roomSession.room.id.trim().toUpperCase()
-    const raw = window.localStorage.getItem(roomSessionStorageKey(code))
+    const raw = window.localStorage.getItem(roomSessionStorageKey)
     if (!raw) return
     let parsed: {
+      roomId?: string
       playerId?: string
       name?: string
       version?: number
@@ -447,6 +448,7 @@ export function Room({ roomSession }: RoomProps) {
       return
     }
     if (
+      parsed.roomId !== code ||
       !parsed.playerId ||
       !parsed.name ||
       typeof parsed.version !== 'number' ||
@@ -466,7 +468,7 @@ export function Room({ roomSession }: RoomProps) {
       const res = await fetch(`${apiUrl('/api/rooms/eligibility')}?${params}`)
       const data = (await res.json()) as { eligible?: boolean }
       if (data.eligible !== true) {
-        window.localStorage.removeItem(roomSessionStorageKey(code))
+        window.localStorage.removeItem(roomSessionStorageKey)
         window.location.reload()
         return
       }

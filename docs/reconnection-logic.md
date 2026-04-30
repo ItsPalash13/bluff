@@ -13,7 +13,7 @@ This document describes the room reconnection behavior currently implemented in 
 
 - `playerId`: stable identifier for a player slot in a room.
 - `room.version`: server-generated room version (`UnixMilli`) set at room creation.
-- Local session key: `bluff:session:<ROOM_CODE>` with `roomId`, `playerId`, `version`, `name`, `characterIndex`.
+- Local session key: `bluff:last-session` with `roomId`, `playerId`, `version`, `name`, `characterIndex`.
 
 ## Backend Rules
 

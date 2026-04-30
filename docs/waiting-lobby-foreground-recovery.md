@@ -34,7 +34,7 @@ Waiting-lobby recovery was implemented **inside **`Room`**** so behavior does no
 
 | Piece | Purpose |
 |--------|--------|
-| **`runWaitingLobbyReconnect`** (`Room.tsx`) | If status is **`waiting`**, reads `bluff:session:<ROOM_CODE>`, validates against **`roomSession.playerId`**, **`GET /api/rooms/eligibility`**, then **`room:join`**—aligned with **`CreateNJoin`** |
+| **`runWaitingLobbyReconnect`** (`Room.tsx`) | If status is **`waiting`**, reads `bluff:last-session`, validates stored `roomId` + **`roomSession.playerId`**, calls **`GET /api/rooms/eligibility`**, then emits **`room:join`**—aligned with **`CreateNJoin`** |
 | **`scheduleWaitingLobbyReconnect`** | Debounce (~260 ms) to coalesce rapid events |
 | Triggers | Socket **`connect`**, **`visibilitychange` → visible**, **`window.online`**, **`pageshow`** when **`event.persisted`**, and entering **`waiting`** (e.g. after “Play again”) |
 

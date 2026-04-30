@@ -27,11 +27,12 @@ function initialJoinEligibilityPhase(roomIdFromPath: string | undefined): JoinEl
   if (typeof window === 'undefined' || !roomIdFromPath) return 'manual'
   const norm = roomIdFromPath.trim().toUpperCase()
   try {
-    const raw = window.localStorage.getItem(roomSessionStorageKey(norm))
+    const raw = window.localStorage.getItem(roomSessionStorageKey)
     if (!raw) return 'manual'
     // Reconnect bootstrap: session must carry room instance version + reconnect identity.
-    const parsed = JSON.parse(raw) as { playerId?: string; name?: string; version?: number }
+    const parsed = JSON.parse(raw) as { roomId?: string; playerId?: string; name?: string; version?: number }
     if (
+      parsed.roomId === norm &&
       parsed.playerId &&
       parsed.name &&
       typeof parsed.version === 'number' &&
@@ -87,12 +88,13 @@ export function CreateNJoin({ connecting, onJoined }: CreateNJoinProps) {
     }
     const norm = roomIdFromPath.trim().toUpperCase()
     // Route re-entry reconnect flow starts from persisted session lookup.
-    const rawSession = window.localStorage.getItem(roomSessionStorageKey(norm))
+    const rawSession = window.localStorage.getItem(roomSessionStorageKey)
     if (!rawSession) {
       setJoinEligibility('manual')
       return
     }
     let parsed: {
+      roomId?: string
       name?: string
       characterIndex?: number
       playerId?: string
@@ -101,11 +103,12 @@ export function CreateNJoin({ connecting, onJoined }: CreateNJoinProps) {
     try {
       parsed = JSON.parse(rawSession) as typeof parsed
     } catch {
-      window.localStorage.removeItem(roomSessionStorageKey(norm))
+      window.localStorage.removeItem(roomSessionStorageKey)
       setJoinEligibility('manual')
       return
     }
     if (
+      parsed.roomId !== norm ||
       !parsed.playerId ||
       !parsed.name ||
       typeof parsed.version !== 'number' ||
@@ -139,7 +142,7 @@ export function CreateNJoin({ connecting, onJoined }: CreateNJoinProps) {
           setJoinEligibility('eligible')
         } else {
           // Reconnect not eligible (stale identity/version/room mismatch): clear session.
-          window.localStorage.removeItem(roomSessionStorageKey(norm))
+          window.localStorage.removeItem(roomSessionStorageKey)
           setJoinEligibility('manual')
         }
       } catch {
@@ -198,7 +201,7 @@ export function CreateNJoin({ connecting, onJoined }: CreateNJoinProps) {
     const persistSession = (room: RoomState, playerId?: string) => {
       if (!playerId) return
       window.localStorage.setItem(
-        roomSessionStorageKey(room.id),
+        roomSessionStorageKey,
         JSON.stringify({
           roomId: room.id,
           playerId,
@@ -253,7 +256,17 @@ export function CreateNJoin({ connecting, onJoined }: CreateNJoinProps) {
         joinRoomCode
       ) {
         // Server rejected reconnect identity for this route; clear stale session.
-        window.localStorage.removeItem(roomSessionStorageKey(joinRoomCode))
+        const raw = window.localStorage.getItem(roomSessionStorageKey)
+        if (raw) {
+          try {
+            const parsed = JSON.parse(raw) as { roomId?: string }
+            if (parsed.roomId === joinRoomCode) {
+              window.localStorage.removeItem(roomSessionStorageKey)
+            }
+          } catch {
+            window.localStorage.removeItem(roomSessionStorageKey)
+          }
+        }
       }
       setJoinEligibility('manual')
       setError(payload.message ?? 'Something went wrong while processing room request.')
@@ -277,19 +290,21 @@ export function CreateNJoin({ connecting, onJoined }: CreateNJoinProps) {
     const normalizedRoom = roomIdFromPath.trim().toUpperCase()
     if (!normalizedRoom || autoJoinAttemptedRef.current === normalizedRoom) return
     autoJoinAttemptedRef.current = normalizedRoom
-    const rawSession = window.localStorage.getItem(roomSessionStorageKey(normalizedRoom))
+    const rawSession = window.localStorage.getItem(roomSessionStorageKey)
     if (!rawSession) {
       setJoinEligibility('manual')
       return
     }
     try {
       const parsed = JSON.parse(rawSession) as {
+        roomId?: string
         name?: string
         characterIndex?: number
         playerId?: string
         version?: number
       }
       if (
+        parsed.roomId !== normalizedRoom ||
         !parsed.playerId ||
         !parsed.name ||
         typeof parsed.version !== 'number' ||
@@ -311,7 +326,7 @@ export function CreateNJoin({ connecting, onJoined }: CreateNJoinProps) {
         playerId: parsed.playerId,
       })
     } catch {
-      window.localStorage.removeItem(roomSessionStorageKey(normalizedRoom))
+      window.localStorage.removeItem(roomSessionStorageKey)
       setJoinEligibility('manual')
     }
   }, [roomIdFromPath, connecting, ensureConnected, joinEligibility])
@@ -354,12 +369,15 @@ export function CreateNJoin({ connecting, onJoined }: CreateNJoinProps) {
       name: name.trim(),
       characterIndex: selectedIndex,
       // If a reconnect session exists for this room code, include playerId/version.
-      ...(window.localStorage.getItem(roomSessionStorageKey(joinRoomCode))
+      ...(window.localStorage.getItem(roomSessionStorageKey)
         ? (() => {
             try {
               const parsed = JSON.parse(
-                window.localStorage.getItem(roomSessionStorageKey(joinRoomCode)) ?? '{}',
-              ) as { playerId?: string; version?: number }
+                window.localStorage.getItem(roomSessionStorageKey) ?? '{}',
+              ) as { roomId?: string; playerId?: string; version?: number }
+              if (parsed.roomId !== joinRoomCode) {
+                return {}
+              }
               return {
                 playerId: parsed.playerId ?? '',
                 version:

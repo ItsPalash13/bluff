@@ -44,7 +44,7 @@ function AppShell() {
       if (socket) {
         socket.emit('room:leave')
       }
-      window.localStorage.removeItem(roomSessionStorageKey(roomSession.room.id))
+      window.localStorage.removeItem(roomSessionStorageKey)
       dispatch(setCommentOpen(false))
       disconnect()
       setRoomSession(null)
